@@ -1,0 +1,393 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+enum ConversationMode {
+  AI
+  PENDING_HUMAN
+  HUMAN
+}
+
+enum HandoffStatus {
+  NONE
+  WAITING
+  ACKNOWLEDGED
+  RESOLVED
+  EXPIRED
+}
+
+enum SenderType {
+  CUSTOMER
+  AI
+  HUMAN
+  SYSTEM
+}
+
+enum MessageDirection {
+  INCOMING
+  OUTGOING
+}
+
+enum MessageProcessingStatus {
+  NOT_APPLICABLE
+  PENDING
+  PROCESSING
+  PROCESSED
+  FAILED
+}
+
+enum IndexingStatus {
+  PENDING
+  INDEXING
+  READY
+  FAILED
+}
+
+enum IndexingJobStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  RETRY
+  FAILED
+}
+
+enum IndexingAction {
+  UPSERT
+  REMOVE
+}
+
+enum AdminRole {
+  OWNER
+  ADMIN
+  SUPPORT
+}
+
+enum TelegramBotKind {
+  BUSINESS
+  ADMIN
+}
+
+enum AuditActorType {
+  ADMIN
+  SYSTEM
+  CUSTOMER
+}
+
+model BusinessAccount {
+  id                    String                 @id @db.Char(36)
+  name                  String                 @db.VarChar(200)
+  telegramAccountUserId BigInt?                @unique @db.BigInt
+  defaultLocale         String                 @default("fa") @db.VarChar(12)
+  isActive              Boolean                @default(true)
+  createdAt             DateTime               @default(now())
+  updatedAt             DateTime               @updatedAt
+  connections           BusinessConnection[]
+  customers             Customer[]
+  conversations         Conversation[]
+  knowledgeItems        KnowledgeItem[]
+  adminAccess           AdminBusinessAccount[]
+  auditLogs             AuditLog[]
+
+  @@index([isActive])
+}
+
+model BusinessConnection {
+  id                 String          @id @db.VarChar(128)
+  businessAccountId  String          @db.Char(36)
+  telegramUserChatId BigInt?         @db.BigInt
+  enabled            Boolean         @default(false)
+  canReply           Boolean         @default(false)
+  rights             Json?
+  connectedAt        DateTime?
+  disabledAt         DateTime?
+  lastUpdateId       BigInt?         @db.BigInt
+  createdAt          DateTime        @default(now())
+  updatedAt          DateTime        @updatedAt
+  businessAccount    BusinessAccount @relation(fields: [businessAccountId], references: [id], onDelete: Cascade)
+  messages           Message[]
+
+  @@index([businessAccountId, enabled])
+}
+
+model Admin {
+  id               String                 @id @db.Char(36)
+  telegramUserId   BigInt                 @unique @db.BigInt
+  displayName      String?                @db.VarChar(200)
+  role             AdminRole
+  isActive         Boolean                @default(true)
+  locale           String                 @default("fa") @db.VarChar(12)
+  createdAt        DateTime               @default(now())
+  updatedAt        DateTime               @updatedAt
+  businessAccess   AdminBusinessAccount[]
+  createdKnowledge KnowledgeItem[]        @relation("KnowledgeCreatedBy")
+  updatedKnowledge KnowledgeItem[]        @relation("KnowledgeUpdatedBy")
+  flowState        AdminFlowState?
+}
+
+model AdminBusinessAccount {
+  adminId           String          @db.Char(36)
+  businessAccountId String          @db.Char(36)
+  createdAt         DateTime        @default(now())
+  admin             Admin           @relation(fields: [adminId], references: [id], onDelete: Cascade)
+  businessAccount   BusinessAccount @relation(fields: [businessAccountId], references: [id], onDelete: Cascade)
+
+  @@id([adminId, businessAccountId])
+  @@index([businessAccountId])
+}
+
+model Customer {
+  id                String          @id @db.Char(36)
+  businessAccountId String          @db.Char(36)
+  telegramUserId    BigInt          @db.BigInt
+  username          String?         @db.VarChar(64)
+  firstName         String?         @db.VarChar(128)
+  lastName          String?         @db.VarChar(128)
+  languageCode      String?         @db.VarChar(12)
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+  businessAccount   BusinessAccount @relation(fields: [businessAccountId], references: [id], onDelete: Cascade)
+  conversations     Conversation[]
+
+  @@unique([businessAccountId, telegramUserId])
+  @@index([username])
+}
+
+model Conversation {
+  id                           String            @id @db.Char(36)
+  businessAccountId            String            @db.Char(36)
+  customerId                   String            @db.Char(36)
+  telegramChatId               BigInt            @db.BigInt
+  mode                         ConversationMode  @default(AI)
+  lastCustomerMessageAt        DateTime?
+  telegramReplyWindowExpiresAt DateTime?
+  humanModeStartedAt           DateTime?
+  humanModeExpiresAt           DateTime?
+  processingLeaseOwner         String?           @db.VarChar(64)
+  processingLeaseExpiresAt     DateTime?
+  createdAt                    DateTime          @default(now())
+  updatedAt                    DateTime          @updatedAt
+  businessAccount              BusinessAccount   @relation(fields: [businessAccountId], references: [id], onDelete: Cascade)
+  customer                     Customer          @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  messages                     Message[]
+  handoffs                     Handoff[]
+  aiDecisions                  AiDecisionLog[]
+  jobs                         ConversationJob[]
+
+  @@unique([businessAccountId, customerId])
+  @@index([mode, humanModeExpiresAt])
+  @@index([processingLeaseExpiresAt])
+  @@index([telegramChatId])
+}
+
+model Message {
+  id                   String                  @id @db.Char(36)
+  conversationId       String                  @db.Char(36)
+  businessConnectionId String                  @db.VarChar(128)
+  telegramChatId       BigInt                  @db.BigInt
+  telegramMessageId    BigInt                  @db.BigInt
+  senderTelegramUserId BigInt?                 @db.BigInt
+  senderType           SenderType
+  direction            MessageDirection
+  text                 String?                 @db.Text
+  editedAt             DateTime?
+  deletedAt            DateTime?
+  rawMetadata          Json?
+  processingStatus     MessageProcessingStatus @default(NOT_APPLICABLE)
+  processingErrorCode  String?                 @db.VarChar(100)
+  sourceMessageId      String?                 @unique @db.Char(36)
+  sentAt               DateTime
+  createdAt            DateTime                @default(now())
+  updatedAt            DateTime                @updatedAt
+  conversation         Conversation            @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  businessConnection   BusinessConnection      @relation(fields: [businessConnectionId], references: [id], onDelete: Restrict)
+  aiDecision           AiDecisionLog?
+  jobs                 ConversationJob[]
+
+  @@unique([businessConnectionId, telegramChatId, telegramMessageId])
+  @@index([conversationId, sentAt])
+  @@index([senderType, direction])
+}
+
+model ConversationJob {
+  id              String                  @id @db.Char(36)
+  conversationId  String                  @db.Char(36)
+  messageId       String                  @unique @db.Char(36)
+  status          MessageProcessingStatus @default(PENDING)
+  processAfter    DateTime
+  attempts        Int                     @default(0)
+  maxAttempts     Int                     @default(5)
+  leaseOwner      String?                 @db.VarChar(64)
+  leaseExpiresAt  DateTime?
+  lastErrorCode   String?                 @db.VarChar(100)
+  lastErrorDetail String?                 @db.Text
+  createdAt       DateTime                @default(now())
+  updatedAt       DateTime                @updatedAt
+  conversation    Conversation            @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  message         Message                 @relation(fields: [messageId], references: [id], onDelete: Cascade)
+
+  @@index([status, processAfter])
+  @@index([leaseExpiresAt])
+}
+
+model Handoff {
+  id             String        @id @db.Char(36)
+  conversationId String        @db.Char(36)
+  status         HandoffStatus @default(WAITING)
+  reasonCode     String        @db.VarChar(100)
+  reasonDetail   String?       @db.Text
+  activeKey      String?       @unique @db.VarChar(80)
+  startedAt      DateTime      @default(now())
+  expiresAt      DateTime
+  acknowledgedAt DateTime?
+  acknowledgedBy String?       @db.Char(36)
+  resolvedAt     DateTime?
+  resolvedBy     String?       @db.Char(36)
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+  conversation   Conversation  @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@index([conversationId, status])
+  @@index([status, expiresAt])
+}
+
+model KnowledgeItem {
+  id                     String           @id @db.Char(36)
+  businessAccountId      String           @db.Char(36)
+  title                  String           @db.VarChar(200)
+  description            String           @db.LongText
+  isActive               Boolean          @default(true)
+  version                Int              @default(1)
+  indexingStatus         IndexingStatus   @default(PENDING)
+  indexingError          String?          @db.Text
+  deletedAt              DateTime?
+  createdAt              DateTime         @default(now())
+  updatedAt              DateTime         @updatedAt
+  createdByAdminId       String           @db.Char(36)
+  updatedByAdminId       String           @db.Char(36)
+  indexingLeaseOwner     String?          @db.VarChar(64)
+  indexingLeaseExpiresAt DateTime?
+  businessAccount        BusinessAccount  @relation(fields: [businessAccountId], references: [id], onDelete: Cascade)
+  createdByAdmin         Admin            @relation("KnowledgeCreatedBy", fields: [createdByAdminId], references: [id], onDelete: Restrict)
+  updatedByAdmin         Admin            @relation("KnowledgeUpdatedBy", fields: [updatedByAdminId], references: [id], onDelete: Restrict)
+  chunks                 KnowledgeChunk[]
+  indexingJobs           IndexingJob[]
+
+  @@index([businessAccountId, isActive, deletedAt])
+  @@index([indexingStatus])
+  @@index([indexingLeaseExpiresAt])
+  @@fulltext([title, description])
+}
+
+model KnowledgeChunk {
+  id               String        @id @db.Char(36)
+  knowledgeItemId  String        @db.Char(36)
+  qdrantChunkId    String        @unique @db.VarChar(128)
+  chunkIndex       Int
+  knowledgeVersion Int
+  content          String        @db.LongText
+  checksum         String        @db.Char(64)
+  isActive         Boolean       @default(true)
+  createdAt        DateTime      @default(now())
+  updatedAt        DateTime      @updatedAt
+  knowledgeItem    KnowledgeItem @relation(fields: [knowledgeItemId], references: [id], onDelete: Cascade)
+
+  @@unique([knowledgeItemId, knowledgeVersion, chunkIndex])
+  @@index([knowledgeItemId, isActive])
+}
+
+model IndexingJob {
+  id               String            @id @db.Char(36)
+  knowledgeItemId  String            @db.Char(36)
+  knowledgeVersion Int
+  action           IndexingAction
+  status           IndexingJobStatus @default(PENDING)
+  dedupeKey        String            @unique @db.VarChar(160)
+  attempts         Int               @default(0)
+  maxAttempts      Int               @default(6)
+  availableAt      DateTime          @default(now())
+  leaseOwner       String?           @db.VarChar(64)
+  leaseExpiresAt   DateTime?
+  lastErrorCode    String?           @db.VarChar(100)
+  lastErrorDetail  String?           @db.Text
+  completedAt      DateTime?
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+  knowledgeItem    KnowledgeItem     @relation(fields: [knowledgeItemId], references: [id], onDelete: Cascade)
+
+  @@index([status, availableAt])
+  @@index([leaseExpiresAt])
+}
+
+model ProcessedTelegramUpdate {
+  id            String          @id @db.VarChar(80)
+  botKind       TelegramBotKind
+  updateId      BigInt          @db.BigInt
+  updateType    String          @db.VarChar(80)
+  correlationId String          @db.Char(36)
+  processedAt   DateTime        @default(now())
+
+  @@unique([botKind, updateId])
+  @@index([processedAt])
+}
+
+model AiDecisionLog {
+  id                 String       @id @db.Char(36)
+  conversationId     String       @db.Char(36)
+  messageId          String       @unique @db.Char(36)
+  answerable         Boolean
+  confidence         Float
+  reason             String       @db.Text
+  answer             String?      @db.LongText
+  supportingChunkIds Json
+  retrievalResults   Json
+  model              String       @db.VarChar(100)
+  promptVersion      String       @db.VarChar(40)
+  inputTokens        Int?
+  outputTokens       Int?
+  totalTokens        Int?
+  latencyMs          Int
+  errorCode          String?      @db.VarChar(100)
+  createdAt          DateTime     @default(now())
+  conversation       Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  message            Message      @relation(fields: [messageId], references: [id], onDelete: Cascade)
+
+  @@index([conversationId, createdAt])
+  @@index([answerable, createdAt])
+}
+
+model AuditLog {
+  id                String           @id @db.Char(36)
+  businessAccountId String?          @db.Char(36)
+  actorType         AuditActorType
+  actorId           String?          @db.VarChar(128)
+  action            String           @db.VarChar(120)
+  entityType        String           @db.VarChar(80)
+  entityId          String           @db.VarChar(128)
+  metadata          Json?
+  correlationId     String?          @db.Char(36)
+  createdAt         DateTime         @default(now())
+  businessAccount   BusinessAccount? @relation(fields: [businessAccountId], references: [id], onDelete: SetNull)
+
+  @@index([businessAccountId, createdAt])
+  @@index([entityType, entityId])
+  @@index([action, createdAt])
+}
+
+model AdminFlowState {
+  id        String   @id @db.Char(36)
+  adminId   String   @unique @db.Char(36)
+  flow      String   @db.VarChar(80)
+  step      String   @db.VarChar(80)
+  data      Json
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  admin     Admin    @relation(fields: [adminId], references: [id], onDelete: Cascade)
+
+  @@index([expiresAt])
+}

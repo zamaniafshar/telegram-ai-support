@@ -1,0 +1,55 @@
+{
+  "name": "telegram-ai-support",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Production Telegram Business AI support with grounded RAG and durable human handoff",
+  "type": "module",
+  "engines": {
+    "node": "^20.19.0 || ^22.13.0 || >=24.0.0"
+  },
+  "scripts": {
+    "dev": "tsx watch src/main.ts",
+    "build": "tsc -p tsconfig.build.json",
+    "start": "node dist/main.js",
+    "worker": "tsx src/worker.ts",
+    "worker:start": "node dist/worker.js",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint . --max-warnings=0",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "test": "vitest run",
+    "test:coverage": "vitest run --coverage",
+    "prisma:generate": "prisma generate",
+    "prisma:migrate": "prisma migrate deploy",
+    "prisma:migrate:dev": "prisma migrate dev",
+    "prisma:seed": "tsx prisma/seed.ts",
+    "qdrant:init": "tsx src/cli/qdrant-init.ts",
+    "qdrant:reindex": "tsx src/cli/qdrant-reindex.ts",
+    "telegram:set-webhooks": "tsx src/cli/telegram-set-webhooks.ts",
+    "telegram:delete-webhooks": "tsx src/cli/telegram-delete-webhooks.ts",
+    "check": "npm run format:check && npm run lint && npm run typecheck && npm run test && npm run build"
+  },
+  "dependencies": {
+    "@fastify/helmet": "13.1.0",
+    "@fastify/rate-limit": "11.2.0",
+    "@fastify/sensible": "6.0.4",
+    "@prisma/client": "6.19.3",
+    "@qdrant/js-client-rest": "1.18.0",
+    "fastify": "5.11.0",
+    "openai": "7.3.0",
+    "pino": "10.3.1",
+    "zod": "4.4.3"
+  },
+  "devDependencies": {
+    "@eslint/js": "10.0.1",
+    "@types/node": "24.10.1",
+    "@vitest/coverage-v8": "4.1.0",
+    "eslint": "10.0.2",
+    "prettier": "3.9.6",
+    "prisma": "6.19.3",
+    "tsx": "4.23.4",
+    "typescript": "5.9.3",
+    "typescript-eslint": "8.56.1",
+    "vitest": "4.1.0"
+  }
+}

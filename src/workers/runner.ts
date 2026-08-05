@@ -1,0 +1,40 @@
+import { randomUUID } from 'node:crypto';
+import { setTimeout as delay } from 'node:timers/promises';
+import type { Logger } from 'pino';
+import type { AppConfig } from '../config/env.js';
+import type { IndexingService } from '../indexing/service.js';
+import type { ConversationProcessor } from '../conversations/processor.js';
+import type { HandoffService } from '../handoffs/service.js';
+
+export class WorkerRunner {
+  readonly workerId = `worker:${randomUUID()}`;
+
+  constructor(
+    private readonly indexing: IndexingService,
+    private readonly conversations: ConversationProcessor,
+    private readonly handoffs: HandoffService,
+    private readonly config: AppConfig,
+    private readonly logger: Logger,
+  ) {}
+
+  async run(signal: AbortSignal): Promise<void> {
+    this.logger.info({ workerId: this.workerId }, 'durable worker started');
+    while (!signal.aborted) {
+      try {
+        const [indexing, conversations, expired] = await Promise.all([
+          this.indexing.runBatch(this.workerId),
+          this.conversations.runBatch(this.workerId),
+          this.handoffs.expireBatch(),
+        ]);
+        if (indexing + conversations + expired > 0) {
+          this.logger.debug({ indexing, conversations, expired }, 'worker cycle completed');
+          continue;
+        }
+      } catch (error) {
+        this.logger.error({ err: error, workerId: this.workerId }, 'worker cycle failed');
+      }
+      await delay(this.config.worker.pollIntervalMs, undefined, { signal }).catch(() => undefined);
+    }
+    this.logger.info({ workerId: this.workerId }, 'durable worker stopped');
+  }
+}
