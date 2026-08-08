@@ -64,11 +64,18 @@ export class QdrantVectorStore implements VectorStore {
       }
     }
 
-    for (const fieldName of ['businessAccountId', 'knowledgeId', 'chunkId', 'isActive']) {
+    const payloadIndexes = [
+      { fieldName: 'businessAccountId', schema: 'keyword' },
+      { fieldName: 'knowledgeId', schema: 'keyword' },
+      { fieldName: 'chunkId', schema: 'keyword' },
+      { fieldName: 'isActive', schema: 'bool' },
+      { fieldName: 'knowledgeVersion', schema: 'integer' },
+    ] as const;
+    for (const { fieldName, schema } of payloadIndexes) {
       await this.client
         .createPayloadIndex(this.config.qdrant.collection, {
           field_name: fieldName,
-          field_schema: fieldName === 'isActive' ? 'bool' : 'keyword',
+          field_schema: schema,
           wait: true,
         })
         .catch((error: unknown) => {

@@ -10,6 +10,13 @@ describe('configuration and security boundaries', () => {
     expect(config.telegram.ownerId).toBe(9007199254740991n);
     expect(config.telegram.businessWebhookSecret).not.toBe(config.telegram.adminWebhookSecret);
     expect(config.openai.baseUrl).toBe('https://nano-gpt.com/api/v1');
+    expect(config.handoff.customerMessageEnabled).toBe(false);
+  });
+
+  it('can explicitly restore the handoff customer message', () => {
+    expect(
+      testConfig({ HANDOFF_CUSTOMER_MESSAGE_ENABLED: 'true' }).handoff.customerMessageEnabled,
+    ).toBe(true);
   });
 
   it('rejects polling in production', () => {

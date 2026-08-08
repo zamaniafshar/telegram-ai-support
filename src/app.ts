@@ -28,7 +28,7 @@ export function createServices(config: AppConfig, logger: Logger, prisma?: Prism
   const notifier = new AdminNotifier(database, adminTelegram, logger);
   const handoffs = new HandoffService(database, config, logger, notifier);
   const indexing = new IndexingService(database, openai, vectors, config, logger, notifier);
-  const messenger = new BusinessMessenger(database, businessTelegram, logger);
+  const messenger = new BusinessMessenger(database, businessTelegram, config, logger);
   const conversations = new ConversationProcessor(
     database,
     retrieval,

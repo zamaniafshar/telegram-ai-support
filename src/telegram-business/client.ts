@@ -64,15 +64,23 @@ export class TelegramBotApiClient implements TelegramApi {
     this.#baseUrl = `https://api.telegram.org/bot${token}`;
   }
 
-  async #call<T>(method: string, body: Record<string, unknown>): Promise<T> {
-    return withRetry(() => this.#callOnce<T>(method, body), {
+  async #call<T>(
+    method: string,
+    body: Record<string, unknown>,
+    requestTimeoutMs = this.timeoutMs,
+  ): Promise<T> {
+    return withRetry(() => this.#callOnce<T>(method, body, requestTimeoutMs), {
       attempts: 3,
       baseDelayMs: 250,
       maxDelayMs: 2_000,
     });
   }
 
-  async #callOnce<T>(method: string, body: Record<string, unknown>): Promise<T> {
+  async #callOnce<T>(
+    method: string,
+    body: Record<string, unknown>,
+    requestTimeoutMs: number,
+  ): Promise<T> {
     let response: Response;
     try {
       response = await fetch(`${this.#baseUrl}/${method}`, {
@@ -81,7 +89,7 @@ export class TelegramBotApiClient implements TelegramApi {
         body: JSON.stringify(body, (_, value: unknown) =>
           typeof value === 'bigint' ? value.toString() : value,
         ),
-        signal: AbortSignal.timeout(this.timeoutMs),
+        signal: AbortSignal.timeout(requestTimeoutMs),
       });
     } catch (error) {
       throw new AppError(`Telegram ${method} request failed`, 'TELEGRAM_NETWORK_ERROR', 502, true, {
@@ -202,10 +210,14 @@ export class TelegramBotApiClient implements TelegramApi {
     allowedUpdates: string[],
     timeoutSeconds: number,
   ): Promise<unknown[]> {
-    return this.#call<unknown[]>('getUpdates', {
-      ...(offset === undefined ? {} : { offset }),
-      timeout: timeoutSeconds,
-      allowed_updates: allowedUpdates,
-    });
+    return this.#call<unknown[]>(
+      'getUpdates',
+      {
+        ...(offset === undefined ? {} : { offset }),
+        timeout: timeoutSeconds,
+        allowed_updates: allowedUpdates,
+      },
+      Math.max(this.timeoutMs, timeoutSeconds * 1_000 + 5_000),
+    );
   }
 }

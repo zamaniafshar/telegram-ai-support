@@ -23,6 +23,7 @@
     "prisma:migrate": "prisma migrate deploy",
     "prisma:migrate:dev": "prisma migrate dev",
     "prisma:seed": "tsx prisma/seed.ts",
+    "mysql:setup": "tsx src/cli/mysql-setup.ts",
     "qdrant:init": "tsx src/cli/qdrant-init.ts",
     "qdrant:reindex": "tsx src/cli/qdrant-reindex.ts",
     "telegram:set-webhooks": "tsx src/cli/telegram-set-webhooks.ts",

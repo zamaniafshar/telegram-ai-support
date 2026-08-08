@@ -226,29 +226,31 @@ export class ConversationProcessor {
   ): Promise<void> {
     const activated = await this.handoffs.activate(conversationId, reasonCode, detail);
     if (!activated.created) return;
-    await this.messenger
-      .sendHandoffAcknowledgement(
-        conversationId,
-        this.config.handoff.customerMessage,
-        sourceMessageId,
-      )
-      .catch(async (error: unknown) => {
-        this.logger.warn(
-          { err: error, conversationId },
-          'handoff acknowledgement could not be sent',
-        );
-        await this.prisma.auditLog.create({
-          data: {
-            id: newId(),
-            businessAccountId: activated.conversation.businessAccountId,
-            actorType: 'SYSTEM',
-            action: 'HANDOFF_ACKNOWLEDGEMENT_FAILED',
-            entityType: 'Conversation',
-            entityId: conversationId,
-            metadata: { errorCode: errorCode(error) },
-          },
+    if (this.config.handoff.customerMessageEnabled) {
+      await this.messenger
+        .sendHandoffAcknowledgement(
+          conversationId,
+          this.config.handoff.customerMessage,
+          sourceMessageId,
+        )
+        .catch(async (error: unknown) => {
+          this.logger.warn(
+            { err: error, conversationId },
+            'handoff acknowledgement could not be sent',
+          );
+          await this.prisma.auditLog.create({
+            data: {
+              id: newId(),
+              businessAccountId: activated.conversation.businessAccountId,
+              actorType: 'SYSTEM',
+              action: 'HANDOFF_ACKNOWLEDGEMENT_FAILED',
+              entityType: 'Conversation',
+              entityId: conversationId,
+              metadata: { errorCode: errorCode(error) },
+            },
+          });
         });
-      });
+    }
     await this.notifier.handoffActivated(conversationId);
   }
 

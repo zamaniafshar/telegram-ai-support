@@ -95,7 +95,7 @@ Create a NanoGPT API key and set `OPENAI_API_KEY`. Keep `OPENAI_BASE_URL=https:/
 3. Put its token in `TELEGRAM_BUSINESS_BOT_TOKEN`.
 4. In the normal support account’s Telegram settings, connect that bot as the account’s business bot and select the customer chats/recipients it may manage.
 5. Grant only **Reply to messages** (`can_reply`). Do not grant delete, profile, gift, star, story, or other permissions.
-6. Grant **Read messages** (`can_read_messages`) only if you deliberately set `TELEGRAM_MARK_READ=true`. The default is false, and the code will not call `readBusinessMessage` without both the configuration flag and the right.
+6. Grant **Read messages** (`can_read_messages`) only if you deliberately set `TELEGRAM_MARK_READ=true`. The default is false. When enabled, the bot marks a customer message as read only after successfully sending an AI answer; messages handed to a human remain unread.
 
 Telegram documents the current `BusinessConnection.rights` object and the rule that reply permission applies to private chats with an incoming message in the preceding 24 hours in the [official Bot API](https://core.telegram.org/bots/api) and [Business Bot rights reference](https://core.telegram.org/constructor/businessBotRights). The system accepts the legacy `can_reply` field only for backward compatibility but persists the current complete rights payload.
 
@@ -173,6 +173,8 @@ These mechanisms are independent:
 2. **Telegram Business reply window:** the bot may send/edit on behalf of the account only when that private customer chat received an incoming message in the preceding 24 hours. `lastCustomerMessageAt` and `telegramReplyWindowExpiresAt` are tracked, but Telegram’s API response is final. An expiry rejection is recorded and not continuously retried. A new customer message reopens the window. The human account owner may still reply manually according to Telegram client capabilities.
 
 Handoff notifications show customer identity, recent context, reason/timestamps, both remaining windows, and mode buttons. A `https://t.me/<username>` button is used only when a username exists. Otherwise the bot explains that no reliable direct link can be made and gives the numeric identity for locating the chat in the actual support account.
+
+By default, handoff only notifies administrators and sends nothing to the customer. Set `HANDOFF_CUSTOMER_MESSAGE_ENABLED=true` to restore the optional acknowledgement using `HANDOFF_CUSTOMER_MESSAGE`.
 
 Outgoing `business_message` updates with `sender_business_bot` are stored as `AI`; outgoing messages from the business account without that marker are `HUMAN`. Neither is queued as a customer question. Manual human replies do not trigger an AI answer and do not themselves change human-mode expiry.
 

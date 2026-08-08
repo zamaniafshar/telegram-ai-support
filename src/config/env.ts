@@ -77,6 +77,7 @@ const envSchema = z.object({
     .default(
       'برای پاسخ دقیق‌تر، گفت‌وگوی شما به پشتیبانی انسانی ارجاع داده شد. همکاران ما پیام شما را بررسی خواهند کرد.',
     ),
+  HANDOFF_CUSTOMER_MESSAGE_ENABLED: booleanString,
 
   WORKER_POLL_INTERVAL_MS: positiveInt(1_500),
   WORKER_BATCH_SIZE: z.coerce.number().int().min(1).max(100).default(10),
@@ -175,6 +176,7 @@ export function loadConfig(source: NodeJS.ProcessEnv = process.env) {
     handoff: {
       hours: env.HANDOFF_HOURS,
       customerMessage: env.HANDOFF_CUSTOMER_MESSAGE,
+      customerMessageEnabled: env.HANDOFF_CUSTOMER_MESSAGE_ENABLED,
       notifyAdditionalMessages: env.ADMIN_NOTIFY_ADDITIONAL_MESSAGES,
     },
     worker: {

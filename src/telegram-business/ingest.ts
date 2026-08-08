@@ -65,37 +65,6 @@ export class BusinessUpdateIngestor {
           false,
           correlationId,
         );
-        if (this.config.telegram.markRead && result.messageId) {
-          const stored = await this.prisma.message.findUnique({
-            where: { id: result.messageId },
-            select: { senderType: true, businessConnection: { select: { rights: true } } },
-          });
-          const rights = stored?.businessConnection.rights;
-          const canRead =
-            rights !== null &&
-            typeof rights === 'object' &&
-            !Array.isArray(rights) &&
-            rights['can_read_messages'] === true;
-          if (stored?.senderType === SenderType.CUSTOMER && canRead) {
-            await this.telegram
-              .readBusinessMessage(
-                update.business_message.business_connection_id ?? '',
-                telegramId(update.business_message.chat.id),
-                telegramId(update.business_message.message_id),
-              )
-              .catch((error: unknown) =>
-                this.logger.warn(
-                  { err: error, messageId: result.messageId },
-                  'mark-as-read failed',
-                ),
-              );
-          } else if (stored?.senderType === SenderType.CUSTOMER) {
-            this.logger.warn(
-              { connectionId: update.business_message.business_connection_id },
-              'mark-as-read configured but can_read_messages is not granted',
-            );
-          }
-        }
         return result;
       }
       if (update.edited_business_message) {
