@@ -61,7 +61,45 @@ describe('pre-model support routing', () => {
       kind: 'SAFE_GREETING',
       answer: 'سلام! چطور می‌توانم کمکتان کنم؟',
     });
+    expect(preModelRoute('سلام وقت بخیر')).toEqual({
+      kind: 'SAFE_GREETING',
+      answer: 'سلام! چطور می‌توانم کمکتان کنم؟',
+    });
+    expect(preModelRoute('سلام،  وقت بخیر!').kind).toBe('SAFE_GREETING');
+    expect(preModelRoute('heloo').kind).toBe('SAFE_GREETING');
   });
+
+  it.each([
+    'سلام علیکم',
+    'سلام و عرض ادب',
+    'عرض سلام، وقتتون بخیر',
+    'درود بر شما',
+    'سلام، خسته نباشید',
+    'سلام خوبین؟',
+    'سلام، حالتون چطوره؟',
+    'روزتون بخیر 🌹',
+    'سلام‌و‌درود',
+    'سلاااممم ادمین',
+    'سلام حالتون خوبه؟',
+    'خسته نباشی',
+    'چه خبر؟',
+    '👋',
+    'Hello there!',
+    'Helloooo',
+    'Hi, how are you?',
+    "What's up?",
+    'salaam vaghtetun bekheir',
+    'dorood, khobin?',
+  ])('recognizes common greeting variant: %s', (text) => {
+    expect(preModelRoute(text).kind).toBe('SAFE_GREETING');
+  });
+
+  it.each(['سلام، قیمت دوره چقدر است؟', 'وقت بخیر، سفارش من کجاست؟', 'Hello, what is your price?'])(
+    'does not hide a business question inside a greeting: %s',
+    (text) => {
+      expect(preModelRoute(text).kind).toBe('ASK_MODEL');
+    },
+  );
 
   it('hands off an unsupported question after empty retrieval', () => {
     expect(preModelRoute('قیمت دوره چقدر است؟', [])).toEqual({
