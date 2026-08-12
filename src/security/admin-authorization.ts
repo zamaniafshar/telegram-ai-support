@@ -20,8 +20,4 @@ export class AdminAuthorizer {
     }
     return admin;
   }
-
-  canManageRole(actor: Admin, targetRole: AdminRole): boolean {
-    return actor.role === AdminRole.OWNER && targetRole !== AdminRole.OWNER;
-  }
 }

@@ -21,7 +21,7 @@ await Promise.all([
   admin.setWebhook(
     `${config.http.publicBaseUrl}${config.telegram.adminWebhookPath}`,
     config.telegram.adminWebhookSecret,
-    ['message', 'callback_query'],
+    ['message'],
   ),
 ]);
 console.log('Both Telegram webhooks were configured with separate secret tokens.');

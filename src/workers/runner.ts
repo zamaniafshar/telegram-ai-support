@@ -5,6 +5,8 @@ import type { AppConfig } from '../config/env.js';
 import type { IndexingService } from '../indexing/service.js';
 import type { ConversationProcessor } from '../conversations/processor.js';
 import type { HandoffService } from '../handoffs/service.js';
+import type { NanoGptCreditMonitor } from '../ai/nanogpt-credit.js';
+import type { AdminNotifier } from '../telegram-admin/notifier.js';
 
 export class WorkerRunner {
   readonly workerId = `worker:${randomUUID()}`;
@@ -13,6 +15,8 @@ export class WorkerRunner {
     private readonly indexing: IndexingService,
     private readonly conversations: ConversationProcessor,
     private readonly handoffs: HandoffService,
+    private readonly creditMonitor: NanoGptCreditMonitor,
+    private readonly notifications: AdminNotifier,
     private readonly config: AppConfig,
     private readonly logger: Logger,
   ) {}
@@ -21,13 +25,18 @@ export class WorkerRunner {
     this.logger.info({ workerId: this.workerId }, 'durable worker started');
     while (!signal.aborted) {
       try {
-        const [indexing, conversations, expired] = await Promise.all([
+        const [indexing, conversations, expired, creditChecked, notifications] = await Promise.all([
           this.indexing.runBatch(this.workerId),
           this.conversations.runBatch(this.workerId),
           this.handoffs.expireBatch(),
+          this.creditMonitor.runDailyCheckIfDue(this.workerId),
+          this.notifications.runBatch(this.workerId),
         ]);
-        if (indexing + conversations + expired > 0) {
-          this.logger.debug({ indexing, conversations, expired }, 'worker cycle completed');
+        if (indexing + conversations + expired + notifications > 0 || creditChecked) {
+          this.logger.debug(
+            { indexing, conversations, expired, creditChecked, notifications },
+            'worker cycle completed',
+          );
           continue;
         }
       } catch (error) {

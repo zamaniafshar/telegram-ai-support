@@ -88,15 +88,6 @@ export const telegramUpdateSchema = z
     edited_business_message: telegramMessageSchema.optional(),
     deleted_business_messages: deletedBusinessMessagesSchema.optional(),
     message: telegramMessageSchema.optional(),
-    callback_query: z
-      .object({
-        id: z.string().min(1),
-        from: telegramUserSchema,
-        data: z.string().max(256).optional(),
-        message: telegramMessageSchema.optional(),
-      })
-      .loose()
-      .optional(),
   })
   .loose();
 
@@ -114,8 +105,7 @@ export function businessCanReadMessages(connection: BusinessConnectionUpdate): b
 
 export interface InlineKeyboardButton {
   text: string;
-  callback_data?: string;
-  url?: string;
+  web_app: { url: string };
 }
 
 export interface InlineKeyboardMarkup {

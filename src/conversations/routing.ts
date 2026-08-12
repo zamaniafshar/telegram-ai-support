@@ -1,19 +1,20 @@
-import type { RetrievalResult } from '../domain/types.js';
 import { explicitlyRequestsHuman, safeGreeting } from './policy.js';
 
 export type PreModelRoute =
-  | { kind: 'HANDOFF'; reasonCode: 'EXPLICIT_HUMAN_REQUEST' | 'NO_RELEVANT_KNOWLEDGE' }
+  | { kind: 'HANDOFF'; reasonCode: 'EXPLICIT_HUMAN_REQUEST' }
   | { kind: 'SAFE_GREETING'; answer: string }
   | { kind: 'ASK_MODEL' };
 
-export function preModelRoute(customerText: string, retrieved?: RetrievalResult[]): PreModelRoute {
+export function preModelRoute(
+  customerText: string,
+  options: { safeGreetingEnabled?: boolean } = {},
+): PreModelRoute {
   if (explicitlyRequestsHuman(customerText)) {
     return { kind: 'HANDOFF', reasonCode: 'EXPLICIT_HUMAN_REQUEST' };
   }
-  const greeting = safeGreeting(customerText);
-  if (greeting) return { kind: 'SAFE_GREETING', answer: greeting };
-  if (retrieved?.length === 0) {
-    return { kind: 'HANDOFF', reasonCode: 'NO_RELEVANT_KNOWLEDGE' };
+  if (options.safeGreetingEnabled ?? true) {
+    const greeting = safeGreeting(customerText);
+    if (greeting) return { kind: 'SAFE_GREETING', answer: greeting };
   }
   return { kind: 'ASK_MODEL' };
 }

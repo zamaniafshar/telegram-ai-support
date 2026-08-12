@@ -61,7 +61,12 @@ describe('knowledge CRUD durability', () => {
   it('increments the version and queues replacement indexing on edit', async () => {
     const { prisma, tx } = knowledgePrisma();
     const service = new KnowledgeService(prisma as never, testConfig());
-    await service.update('knowledge-1', { description: 'New approved facts' }, 'admin-1');
+    await service.update(
+      'business-1',
+      'knowledge-1',
+      { description: 'New approved facts' },
+      'admin-1',
+    );
     expect(tx.knowledgeItem.update).toHaveBeenCalledWith(
       expect.objectContaining({ data: expect.objectContaining({ version: { increment: 1 } }) }),
     );
@@ -73,7 +78,7 @@ describe('knowledge CRUD durability', () => {
   it('soft-deletes knowledge and queues vector removal', async () => {
     const { prisma, tx } = knowledgePrisma();
     const service = new KnowledgeService(prisma as never, testConfig());
-    await service.delete('knowledge-1', 'admin-1');
+    await service.delete('business-1', 'knowledge-1', 'admin-1');
     expect(tx.knowledgeItem.update).toHaveBeenCalledWith(
       expect.objectContaining({ data: expect.objectContaining({ isActive: false }) }),
     );

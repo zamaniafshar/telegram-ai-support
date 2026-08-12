@@ -2,12 +2,39 @@ import { ConversationMode } from '@prisma/client';
 
 const humanRequestPatterns = [
   /\b(human|person|agent|operator|representative|real person)\b/i,
+  /^(?:are you|r u) (?:an? )?(?:ai|bot|robot|chatgpt)(?: assistant)?$/i,
+  /^(?:what|which) (?:ai )?model (?:are you|is this|do you use)$/i,
+  /\b(?:you sound|you talk|you write|you respond) like (?:an? )?(?:ai|bot|robot)\b/i,
+  /(?:poshtiban|operator|karshenas|ensan|adam vaghei).*(?:vasl|sohbat|javab|komak)/i,
+  /(?:vasl|sohbat).*(?:poshtiban|operator|karshenas|ensan|adam vaghei)/i,
+  /^(?:(?:vaghean|yani) )?(?:(?:to|shoma) )?(?:rob[oa]t|bot)(?:i| (?:hasti|hastid|hastin))?$/i,
+  /^(?:(?:to|shoma) )?(?:ho+sh(?:e)? masno+(?:e)?[iy]|ai)(?:i| (?:hasti|hastid|hastin))?$/i,
+  /^(?:(?:to|shoma) )?(?:(?:kodom|che) (?:model(?:e)? ho+sh(?:e)? masno+(?:e)?[iy]|model(?:e)? ai|ai model)|az (?:kodom|che) (?:model(?:e)? ho+sh(?:e)? masno+(?:e)?[iy]|model(?:e)? ai|ai model) estefade mi ?(?:koni|konid))(?: (?:hasti|hastid|hastin))?$/i,
+  /(?:shabih(?:e)?|mesl(?:e)?) (?:ye )?(?:rob[oa]t|bot) (?:sohbat|harf|javab|pasokh) mi ?(?:koni|konid|di|did|zani|zanid)/i,
   /(?:پشتیبان|اپراتور|کارشناس|انسان|آدم واقعی|مسئول).*(?:وصل|صحبت|پاسخ|کمک)/u,
   /(?:وصل|صحبت).*(?:پشتیبان|اپراتور|کارشناس|انسان)/u,
+  /^(?:(?:واقعا|یعنی) )?(?:(?:تو|شما) )?(?:ربات|بات|چت جی پی تی|chatgpt)(?:ی| (?:هستی|هستید|هستین))?$/iu,
+  /^(?:(?:تو|شما) )?(?:هوش مصنوعی|ai)(?:ی| (?:هستی|هستید|هستین))?$/iu,
+  /^(?:(?:تو|شما) )?(?:(?:کدوم|کدام|چه) (?:مدل هوش مصنوعی|مدل زبانی|ai model)|از (?:کدوم|کدام|چه) (?:مدل هوش مصنوعی|مدل زبانی|ai model) استفاده می ?(?:کنی|کنید))(?: (?:هستی|هستید|هستین))?$/iu,
+  /(?:شبیه|مثل) (?:یک |یه )?(?:ربات|بات) (?:صحبت|حرف|جواب|پاسخ) می ?(?:کنی|کنید|دی|دید|زنی|زنید)/u,
 ];
 
+function normalizePolicyText(text: string): string {
+  return text
+    .normalize('NFKC')
+    .toLocaleLowerCase('fa')
+    .replace(/[يى]/gu, 'ی')
+    .replace(/ك/gu, 'ک')
+    .replace(/[ً-ٰٟـ]/gu, '')
+    .replace(/[\u200c\u200d]/gu, ' ')
+    .replace(/[\p{P}\p{S}]+/gu, ' ')
+    .trim()
+    .replace(/\s+/gu, ' ');
+}
+
 export function explicitlyRequestsHuman(text: string): boolean {
-  return humanRequestPatterns.some((pattern) => pattern.test(text.normalize('NFKC')));
+  const normalized = normalizePolicyText(text);
+  return humanRequestPatterns.some((pattern) => pattern.test(normalized));
 }
 
 const persianGreetingPart = [
@@ -60,21 +87,8 @@ const finglishGreetingPattern = new RegExp(
   'u',
 );
 
-function normalizeGreeting(text: string): string {
-  return text
-    .normalize('NFKC')
-    .toLocaleLowerCase('fa')
-    .replace(/[يى]/gu, 'ی')
-    .replace(/ك/gu, 'ک')
-    .replace(/[ً-ٰٟـ]/gu, '')
-    .replace(/[\u200c\u200d]/gu, ' ')
-    .replace(/[\p{P}\p{S}]+/gu, ' ')
-    .trim()
-    .replace(/\s+/gu, ' ');
-}
-
 export function safeGreeting(text: string): string | null {
-  const normalized = normalizeGreeting(text);
+  const normalized = normalizePolicyText(text);
   if (persianGreetingPattern.test(normalized) || finglishGreetingPattern.test(normalized)) {
     return 'سلام! چطور می‌توانم کمکتان کنم؟';
   }

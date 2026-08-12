@@ -40,7 +40,7 @@ if (config.telegram.transport === 'polling') {
   );
   const adminPolling = new LongPollingRunner(
     services.adminTelegram,
-    ['message', 'callback_query'],
+    ['message'],
     async (update) => {
       await services.adminHandler.handle(update, randomUUID());
     },

@@ -52,7 +52,7 @@ describe('human mode transitions', () => {
     const { prisma, tx } = transactionPrisma();
     const notifier = { aiRestored: vi.fn().mockResolvedValue(undefined) };
     const service = new HandoffService(prisma as never, testConfig(), silentLogger, notifier);
-    expect(await service.enableAiNow('conversation-1', admin)).toBe(true);
+    expect(await service.enableAiNow('business-1', 'conversation-1', admin)).toBe(true);
     expect(tx.conversation.updateMany).toHaveBeenCalledWith(
       expect.objectContaining({ data: expect.objectContaining({ mode: ConversationMode.AI }) }),
     );
@@ -68,7 +68,7 @@ describe('human mode transitions', () => {
     const { prisma, tx } = transactionPrisma();
     const service = new HandoffService(prisma as never, testConfig(), silentLogger);
     const now = new Date('2026-08-03T00:00:00.000Z');
-    const expiresAt = await service.extend('conversation-1', admin, now);
+    const expiresAt = await service.extend('business-1', 'conversation-1', admin, now);
     expect(expiresAt.toISOString()).toBe('2026-08-04T00:00:00.000Z');
     expect(tx.handoff.updateMany).toHaveBeenCalledWith(
       expect.objectContaining({ data: { expiresAt } }),

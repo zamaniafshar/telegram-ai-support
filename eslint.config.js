@@ -2,7 +2,7 @@ import eslint from '@eslint/js';
 import tseslint from 'typescript-eslint';
 
 export default tseslint.config(
-  { ignores: ['dist/**', 'coverage/**', 'node_modules/**', 'prisma/migrations/**'] },
+  { ignores: ['dist/**', 'web/dist/**', 'coverage/**', 'node_modules/**', 'prisma/migrations/**'] },
   eslint.configs.recommended,
   ...tseslint.configs.strictTypeChecked,
   ...tseslint.configs.stylisticTypeChecked,
@@ -31,7 +31,39 @@ export default tseslint.config(
     },
   },
   {
+    files: ['web/**/*.ts', 'web/**/*.tsx'],
+    languageOptions: {
+      parserOptions: {
+        project: './web/tsconfig.json',
+        projectService: false,
+      },
+    },
+    rules: {
+      '@typescript-eslint/no-misused-promises': [
+        'error',
+        { checksVoidReturn: { attributes: false } },
+      ],
+      '@typescript-eslint/unbound-method': 'off',
+    },
+  },
+  {
     ...tseslint.configs.disableTypeChecked,
     files: ['**/*.config.js', '**/*.config.ts'],
+  },
+  {
+    ...tseslint.configs.disableTypeChecked,
+    files: ['public/**/*.js'],
+    languageOptions: {
+      parserOptions: { project: false, projectService: false },
+      globals: {
+        crypto: 'readonly',
+        document: 'readonly',
+        fetch: 'readonly',
+        FormData: 'readonly',
+        URL: 'readonly',
+        URLSearchParams: 'readonly',
+        window: 'readonly',
+      },
+    },
   },
 );

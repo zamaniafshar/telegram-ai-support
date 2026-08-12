@@ -78,6 +78,21 @@ enum AuditActorType {
   CUSTOMER
 }
 
+enum NotificationSeverity {
+  INFO
+  SUCCESS
+  WARNING
+  ERROR
+}
+
+enum NotificationDeliveryStatus {
+  PENDING
+  PROCESSING
+  RETRY
+  DELIVERED
+  FAILED
+}
+
 model BusinessAccount {
   id                    String                 @id @db.Char(36)
   name                  String                 @db.VarChar(200)
@@ -90,10 +105,32 @@ model BusinessAccount {
   customers             Customer[]
   conversations         Conversation[]
   knowledgeItems        KnowledgeItem[]
+  knowledgeDrafts       KnowledgeDraft[]
   adminAccess           AdminBusinessAccount[]
   auditLogs             AuditLog[]
+  notifications         Notification[]
+  aiSettings            BusinessAiSettings?
 
   @@index([isActive])
+}
+
+model BusinessAiSettings {
+  id                 String          @id @db.Char(36)
+  businessAccountId  String          @unique @db.Char(36)
+  enabled            Boolean         @default(true)
+  timezone           String          @default("Asia/Tehran") @db.VarChar(64)
+  weeklySchedule     Json
+  outsideHoursPolicy String          @default("SILENT") @db.VarChar(32)
+  version            Int             @default(1)
+  lastChangeReason   String?         @db.VarChar(500)
+  updatedByAdminId   String?         @db.Char(36)
+  createdAt          DateTime        @default(now())
+  updatedAt          DateTime        @updatedAt
+  businessAccount    BusinessAccount @relation(fields: [businessAccountId], references: [id], onDelete: Cascade)
+  updatedByAdmin     Admin?          @relation(fields: [updatedByAdminId], references: [id], onDelete: SetNull)
+
+  @@index([enabled])
+  @@index([updatedByAdminId])
 }
 
 model BusinessConnection {
@@ -115,18 +152,21 @@ model BusinessConnection {
 }
 
 model Admin {
-  id               String                 @id @db.Char(36)
-  telegramUserId   BigInt                 @unique @db.BigInt
-  displayName      String?                @db.VarChar(200)
-  role             AdminRole
-  isActive         Boolean                @default(true)
-  locale           String                 @default("fa") @db.VarChar(12)
-  createdAt        DateTime               @default(now())
-  updatedAt        DateTime               @updatedAt
-  businessAccess   AdminBusinessAccount[]
-  createdKnowledge KnowledgeItem[]        @relation("KnowledgeCreatedBy")
-  updatedKnowledge KnowledgeItem[]        @relation("KnowledgeUpdatedBy")
-  flowState        AdminFlowState?
+  id                String                 @id @db.Char(36)
+  telegramUserId    BigInt                 @unique @db.BigInt
+  displayName       String?                @db.VarChar(200)
+  role              AdminRole
+  isActive          Boolean                @default(true)
+  locale            String                 @default("fa") @db.VarChar(12)
+  createdAt         DateTime               @default(now())
+  updatedAt         DateTime               @updatedAt
+  businessAccess    AdminBusinessAccount[]
+  createdKnowledge  KnowledgeItem[]        @relation("KnowledgeCreatedBy")
+  updatedKnowledge  KnowledgeItem[]        @relation("KnowledgeUpdatedBy")
+  knowledgeDrafts   KnowledgeDraft[]
+  sessions          AdminSession[]
+  notifications     NotificationDelivery[]
+  aiSettingsUpdates BusinessAiSettings[]
 }
 
 model AdminBusinessAccount {
@@ -235,24 +275,47 @@ model ConversationJob {
 }
 
 model Handoff {
-  id             String        @id @db.Char(36)
-  conversationId String        @db.Char(36)
-  status         HandoffStatus @default(WAITING)
-  reasonCode     String        @db.VarChar(100)
-  reasonDetail   String?       @db.Text
-  activeKey      String?       @unique @db.VarChar(80)
-  startedAt      DateTime      @default(now())
-  expiresAt      DateTime
-  acknowledgedAt DateTime?
-  acknowledgedBy String?       @db.Char(36)
-  resolvedAt     DateTime?
-  resolvedBy     String?       @db.Char(36)
-  createdAt      DateTime      @default(now())
-  updatedAt      DateTime      @updatedAt
-  conversation   Conversation  @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  id                String        @id @db.Char(36)
+  conversationId    String        @db.Char(36)
+  status            HandoffStatus @default(WAITING)
+  reasonCode        String        @db.VarChar(100)
+  reasonDetail      String?       @db.Text
+  activeKey         String?       @unique @db.VarChar(80)
+  startedAt         DateTime      @default(now())
+  expiresAt         DateTime
+  acknowledgedAt    DateTime?
+  acknowledgedBy    String?       @db.Char(36)
+  claimedAt         DateTime?
+  claimedBy         String?       @db.Char(36)
+  resolvedAt        DateTime?
+  resolvedBy        String?       @db.Char(36)
+  resolutionOutcome String?       @db.VarChar(80)
+  resolutionNote    String?       @db.Text
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
+  conversation      Conversation  @relation(fields: [conversationId], references: [id], onDelete: Cascade)
 
   @@index([conversationId, status])
   @@index([status, expiresAt])
+}
+
+model KnowledgeDraft {
+  id                String          @id @db.Char(36)
+  businessAccountId String          @db.Char(36)
+  knowledgeItemId   String?         @unique @db.Char(36)
+  title             String          @db.VarChar(200)
+  description       String          @db.LongText
+  revision          Int             @default(1)
+  createdByAdminId  String          @db.Char(36)
+  updatedByAdminId  String          @db.Char(36)
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+  businessAccount   BusinessAccount @relation(fields: [businessAccountId], references: [id], onDelete: Cascade)
+  knowledgeItem     KnowledgeItem?  @relation(fields: [knowledgeItemId], references: [id], onDelete: Cascade)
+  createdByAdmin    Admin           @relation(fields: [createdByAdminId], references: [id], onDelete: Restrict)
+
+  @@index([businessAccountId, updatedAt])
+  @@index([updatedByAdminId])
 }
 
 model KnowledgeItem {
@@ -267,15 +330,16 @@ model KnowledgeItem {
   deletedAt              DateTime?
   createdAt              DateTime         @default(now())
   updatedAt              DateTime         @updatedAt
-  createdByAdminId       String           @db.Char(36)
-  updatedByAdminId       String           @db.Char(36)
+  createdByAdminId       String?          @db.Char(36)
+  updatedByAdminId       String?          @db.Char(36)
   indexingLeaseOwner     String?          @db.VarChar(64)
   indexingLeaseExpiresAt DateTime?
   businessAccount        BusinessAccount  @relation(fields: [businessAccountId], references: [id], onDelete: Cascade)
-  createdByAdmin         Admin            @relation("KnowledgeCreatedBy", fields: [createdByAdminId], references: [id], onDelete: Restrict)
-  updatedByAdmin         Admin            @relation("KnowledgeUpdatedBy", fields: [updatedByAdminId], references: [id], onDelete: Restrict)
+  createdByAdmin         Admin?           @relation("KnowledgeCreatedBy", fields: [createdByAdminId], references: [id], onDelete: SetNull)
+  updatedByAdmin         Admin?           @relation("KnowledgeUpdatedBy", fields: [updatedByAdminId], references: [id], onDelete: SetNull)
   chunks                 KnowledgeChunk[]
   indexingJobs           IndexingJob[]
+  draft                  KnowledgeDraft?
 
   @@index([businessAccountId, isActive, deletedAt])
   @@index([indexingStatus])
@@ -378,16 +442,77 @@ model AuditLog {
   @@index([action, createdAt])
 }
 
-model AdminFlowState {
-  id        String   @id @db.Char(36)
-  adminId   String   @unique @db.Char(36)
-  flow      String   @db.VarChar(80)
-  step      String   @db.VarChar(80)
-  data      Json
-  expiresAt DateTime
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-  admin     Admin    @relation(fields: [adminId], references: [id], onDelete: Cascade)
+model AdminSession {
+  id         String    @id @db.Char(36)
+  adminId    String    @db.Char(36)
+  tokenHash  String    @unique @db.Char(64)
+  csrfHash   String    @db.Char(64)
+  createdAt  DateTime  @default(now())
+  lastSeenAt DateTime  @default(now())
+  expiresAt  DateTime
+  revokedAt  DateTime?
+  admin      Admin     @relation(fields: [adminId], references: [id], onDelete: Cascade)
 
-  @@index([expiresAt])
+  @@index([adminId, expiresAt])
+  @@index([expiresAt, revokedAt])
+}
+
+model Notification {
+  id                String                 @id @db.Char(36)
+  dedupeKey         String                 @unique @db.VarChar(190)
+  type              String                 @db.VarChar(80)
+  severity          NotificationSeverity
+  businessAccountId String?                @db.Char(36)
+  relatedEntityType String                 @db.VarChar(80)
+  relatedEntityId   String                 @db.VarChar(128)
+  titleFa           String                 @db.VarChar(200)
+  summaryFa         String                 @db.VarChar(500)
+  destinationPath   String                 @db.VarChar(500)
+  publicToken       String                 @unique @db.Char(36)
+  createdAt         DateTime               @default(now())
+  businessAccount   BusinessAccount?       @relation(fields: [businessAccountId], references: [id], onDelete: Cascade)
+  deliveries        NotificationDelivery[]
+
+  @@index([businessAccountId, createdAt])
+  @@index([relatedEntityType, relatedEntityId])
+}
+
+model NotificationDelivery {
+  id                String                     @id @db.Char(36)
+  notificationId    String                     @db.Char(36)
+  adminId           String                     @db.Char(36)
+  status            NotificationDeliveryStatus @default(PENDING)
+  attempts          Int                        @default(0)
+  maxAttempts       Int                        @default(8)
+  availableAt       DateTime                   @default(now())
+  leaseOwner        String?                    @db.VarChar(64)
+  leaseExpiresAt    DateTime?
+  lastErrorCode     String?                    @db.VarChar(100)
+  telegramMessageId BigInt?                    @db.BigInt
+  deliveredAt       DateTime?
+  readAt            DateTime?
+  createdAt         DateTime                   @default(now())
+  updatedAt         DateTime                   @updatedAt
+  notification      Notification               @relation(fields: [notificationId], references: [id], onDelete: Cascade)
+  admin             Admin                      @relation(fields: [adminId], references: [id], onDelete: Cascade)
+
+  @@unique([notificationId, adminId])
+  @@index([status, availableAt])
+  @@index([leaseExpiresAt])
+  @@index([adminId, readAt, createdAt])
+}
+
+model ProviderCreditMonitorState {
+  id                      String    @id @db.VarChar(40)
+  nextCheckAt             DateTime  @default(now())
+  leaseOwner              String?   @db.VarChar(64)
+  leaseExpiresAt          DateTime?
+  lastCheckedAt           DateTime?
+  lastBalanceUsd          Decimal?  @db.Decimal(20, 8)
+  lastLowBalanceAlertAt   DateTime?
+  lastInsufficientAlertAt DateTime?
+  createdAt               DateTime  @default(now())
+  updatedAt               DateTime  @updatedAt
+
+  @@index([nextCheckAt, leaseExpiresAt])
 }

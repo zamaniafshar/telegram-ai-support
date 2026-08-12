@@ -25,6 +25,13 @@ export class AuthorizationError extends AppError {
   }
 }
 
+export class ResourceUnavailableError extends AppError {
+  constructor() {
+    super('Resource is unavailable', 'RESOURCE_UNAVAILABLE', 404, false);
+    this.name = 'ResourceUnavailableError';
+  }
+}
+
 export function errorCode(error: unknown): string {
   if (error instanceof AppError) return error.code;
   if (error instanceof Error) return error.name.toUpperCase();

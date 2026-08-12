@@ -3,6 +3,7 @@ import {
   IndexingJobStatus,
   IndexingStatus,
   type IndexingJob,
+  type Prisma,
   type PrismaClient,
 } from '@prisma/client';
 import type { Logger } from 'pino';
@@ -15,13 +16,41 @@ import { errorCode, isRetryable, safeErrorDetail } from '../utils/errors.js';
 import { millisecondsFrom } from '../utils/time.js';
 import { indexingFailureState } from './retry-policy.js';
 
-export interface IndexingFailureNotifier {
+export interface IndexingNotifier {
+  indexingSucceeded(input: {
+    businessAccountId: string;
+    knowledgeId: string;
+    title: string;
+    chunkCount: number;
+    knowledgeVersion?: number;
+  }): Promise<void>;
   indexingFailed(input: {
     businessAccountId: string;
     knowledgeId: string;
     title: string;
     errorCode: string;
+    knowledgeVersion?: number;
   }): Promise<void>;
+  indexingSucceededInTransaction?(
+    client: Prisma.TransactionClient,
+    input: {
+      businessAccountId: string;
+      knowledgeId: string;
+      title: string;
+      chunkCount: number;
+      knowledgeVersion?: number;
+    },
+  ): Promise<void>;
+  indexingFailedInTransaction?(
+    client: Prisma.TransactionClient,
+    input: {
+      businessAccountId: string;
+      knowledgeId: string;
+      title: string;
+      errorCode: string;
+      knowledgeVersion?: number;
+    },
+  ): Promise<void>;
 }
 
 export class IndexingService {
@@ -31,7 +60,7 @@ export class IndexingService {
     private readonly vectors: VectorStore,
     private readonly config: AppConfig,
     private readonly logger: Logger,
-    private readonly notifier?: IndexingFailureNotifier,
+    private readonly notifier?: IndexingNotifier,
   ) {}
 
   async runBatch(workerId: string): Promise<number> {
@@ -194,7 +223,7 @@ export class IndexingService {
     await this.vectors.upsert(points);
     await this.vectors.removeObsoleteVersions(item.id, item.version);
 
-    await this.prisma.$transaction(async (tx) => {
+    const published = await this.prisma.$transaction(async (tx) => {
       await tx.knowledgeChunk.deleteMany({
         where: { knowledgeItemId: item.id, knowledgeVersion: { not: item.version } },
       });
@@ -217,7 +246,7 @@ export class IndexingService {
           },
         });
       }
-      await tx.knowledgeItem.updateMany({
+      const updated = await tx.knowledgeItem.updateMany({
         where: { id: item.id, version: item.version },
         data: { indexingStatus: IndexingStatus.READY, indexingError: null },
       });
@@ -232,11 +261,36 @@ export class IndexingService {
           lastErrorDetail: null,
         },
       });
+      if (updated.count === 1) {
+        await this.notifier?.indexingSucceededInTransaction?.(tx, {
+          businessAccountId: item.businessAccountId,
+          knowledgeId: item.id,
+          title: item.title,
+          chunkCount: chunks.length,
+          knowledgeVersion: item.version,
+        });
+      }
+      return updated.count === 1;
     });
     this.logger.info(
       { indexingJobId: job.id, knowledgeId: item.id, chunks: chunks.length },
       'indexing job completed',
     );
+    if (published && this.notifier && !this.notifier.indexingSucceededInTransaction) {
+      await this.notifier
+        .indexingSucceeded({
+          businessAccountId: item.businessAccountId,
+          knowledgeId: item.id,
+          title: item.title,
+          chunkCount: chunks.length,
+        })
+        .catch((notifyError: unknown) =>
+          this.logger.error(
+            { err: notifyError, knowledgeId: item.id },
+            'indexing success notification failed',
+          ),
+        );
+    }
   }
 
   async #completeJob(id: string): Promise<void> {
@@ -261,8 +315,8 @@ export class IndexingService {
     const retry = failure.retry;
     const code = errorCode(error);
     const detail = safeErrorDetail(error);
-    await this.prisma.$transaction([
-      this.prisma.indexingJob.update({
+    await this.prisma.$transaction(async (tx) => {
+      await tx.indexingJob.update({
         where: { id: job.id },
         data: {
           status: failure.jobStatus,
@@ -272,20 +326,32 @@ export class IndexingService {
           lastErrorCode: code,
           lastErrorDetail: detail,
         },
-      }),
-      this.prisma.knowledgeItem.updateMany({
+      });
+      await tx.knowledgeItem.updateMany({
         where: { id: job.knowledgeItemId, version: job.knowledgeVersion },
         data: {
           indexingStatus: failure.itemStatus,
           indexingError: detail,
         },
-      }),
-    ]);
+      });
+      if (!retry && this.notifier?.indexingFailedInTransaction) {
+        const item = await tx.knowledgeItem.findUniqueOrThrow({
+          where: { id: job.knowledgeItemId },
+        });
+        await this.notifier.indexingFailedInTransaction(tx, {
+          businessAccountId: item.businessAccountId,
+          knowledgeId: item.id,
+          title: item.title,
+          errorCode: code,
+          knowledgeVersion: item.version,
+        });
+      }
+    });
     this.logger.error(
       { err: error, indexingJobId: job.id, retry, attempt: job.attempts },
       'indexing job failed',
     );
-    if (!retry && this.notifier) {
+    if (!retry && this.notifier && !this.notifier.indexingFailedInTransaction) {
       const item = await this.prisma.knowledgeItem.findUniqueOrThrow({
         where: { id: job.knowledgeItemId },
       });
@@ -295,6 +361,7 @@ export class IndexingService {
           knowledgeId: item.id,
           title: item.title,
           errorCode: code,
+          knowledgeVersion: item.version,
         })
         .catch((notifyError: unknown) =>
           this.logger.error(

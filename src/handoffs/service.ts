@@ -15,6 +15,19 @@ import { AppError } from '../utils/errors.js';
 
 export interface ModeChangeNotifier {
   aiRestored(conversationId: string, automatic: boolean): Promise<void>;
+  handoffActivatedInTransaction?(
+    client: Prisma.TransactionClient,
+    input: { businessAccountId: string; conversationId: string; handoffId: string },
+  ): Promise<void>;
+  aiRestoredInTransaction?(
+    client: Prisma.TransactionClient,
+    input: {
+      businessAccountId: string;
+      conversationId: string;
+      automatic: boolean;
+      eventKey: string;
+    },
+  ): Promise<void>;
 }
 
 export class HandoffService {
@@ -89,6 +102,11 @@ export class HandoffService {
             metadata: { reasonCode, handoffId: handoff.id, expiresAt: expiresAt.toISOString() },
           },
         });
+        await this.notifier?.handoffActivatedInTransaction?.(tx, {
+          businessAccountId: conversation.businessAccountId,
+          conversationId,
+          handoffId: handoff.id,
+        });
         return { conversation, handoff, created: true };
       });
     } catch (error) {
@@ -108,10 +126,15 @@ export class HandoffService {
     }
   }
 
-  async enableAiNow(conversationId: string, admin: Admin, now = new Date()): Promise<boolean> {
+  async enableAiNow(
+    businessAccountId: string,
+    conversationId: string,
+    admin: Admin,
+    now = new Date(),
+  ): Promise<boolean> {
     const changed = await this.prisma.$transaction(async (tx) => {
       const update = await tx.conversation.updateMany({
-        where: { id: conversationId, mode: ConversationMode.HUMAN },
+        where: { id: conversationId, businessAccountId, mode: ConversationMode.HUMAN },
         data: { mode: ConversationMode.AI, humanModeStartedAt: null, humanModeExpiresAt: null },
       });
       if (update.count !== 1) return false;
@@ -138,17 +161,30 @@ export class HandoffService {
           entityId: conversationId,
         },
       });
+      await this.notifier?.aiRestoredInTransaction?.(tx, {
+        businessAccountId,
+        conversationId,
+        automatic: false,
+        eventKey: now.toISOString(),
+      });
       return true;
     });
-    if (changed) await this.notifier?.aiRestored(conversationId, false);
+    if (changed && !this.notifier?.aiRestoredInTransaction) {
+      await this.notifier?.aiRestored(conversationId, false);
+    }
     return changed;
   }
 
-  async extend(conversationId: string, admin: Admin, now = new Date()): Promise<Date> {
+  async extend(
+    businessAccountId: string,
+    conversationId: string,
+    admin: Admin,
+    now = new Date(),
+  ): Promise<Date> {
     const expiresAt = hoursFrom(now, this.config.handoff.hours);
     return this.prisma.$transaction(async (tx) => {
       const changed = await tx.conversation.updateMany({
-        where: { id: conversationId, mode: ConversationMode.HUMAN },
+        where: { id: conversationId, businessAccountId, mode: ConversationMode.HUMAN },
         data: { humanModeExpiresAt: expiresAt },
       });
       if (changed.count !== 1)
@@ -176,15 +212,134 @@ export class HandoffService {
     });
   }
 
-  async acknowledge(conversationId: string, admin: Admin, now = new Date()): Promise<void> {
-    await this.prisma.handoff.updateMany({
-      where: { conversationId, status: HandoffStatus.WAITING, activeKey: { not: null } },
-      data: {
-        status: HandoffStatus.ACKNOWLEDGED,
-        acknowledgedAt: now,
-        acknowledgedBy: admin.id,
-      },
+  async acknowledge(
+    businessAccountId: string,
+    conversationId: string,
+    admin: Admin,
+    now = new Date(),
+  ): Promise<void> {
+    await this.prisma.$transaction(async (tx) => {
+      const changed = await tx.handoff.updateMany({
+        where: {
+          conversationId,
+          status: HandoffStatus.WAITING,
+          activeKey: { not: null },
+          conversation: { businessAccountId },
+        },
+        data: {
+          status: HandoffStatus.ACKNOWLEDGED,
+          acknowledgedAt: now,
+          acknowledgedBy: admin.id,
+        },
+      });
+      if (changed.count !== 1) {
+        throw new AppError('Handoff is no longer waiting', 'HANDOFF_STATE_CONFLICT', 409);
+      }
+      await tx.auditLog.create({
+        data: {
+          id: newId(),
+          businessAccountId,
+          actorType: 'ADMIN',
+          actorId: admin.id,
+          action: 'HANDOFF_ACKNOWLEDGED',
+          entityType: 'Conversation',
+          entityId: conversationId,
+        },
+      });
     });
+  }
+
+  async claim(
+    businessAccountId: string,
+    conversationId: string,
+    admin: Admin,
+    now = new Date(),
+  ): Promise<void> {
+    await this.prisma.$transaction(async (tx) => {
+      const changed = await tx.handoff.updateMany({
+        where: {
+          conversationId,
+          activeKey: { not: null },
+          claimedBy: null,
+          status: { in: [HandoffStatus.WAITING, HandoffStatus.ACKNOWLEDGED] },
+          conversation: { businessAccountId },
+        },
+        data: {
+          status: HandoffStatus.ACKNOWLEDGED,
+          acknowledgedAt: now,
+          acknowledgedBy: admin.id,
+          claimedAt: now,
+          claimedBy: admin.id,
+        },
+      });
+      if (changed.count !== 1) {
+        throw new AppError('Handoff is already claimed or closed', 'HANDOFF_CLAIM_CONFLICT', 409);
+      }
+      await tx.auditLog.create({
+        data: {
+          id: newId(),
+          businessAccountId,
+          actorType: 'ADMIN',
+          actorId: admin.id,
+          action: 'HANDOFF_CLAIMED',
+          entityType: 'Conversation',
+          entityId: conversationId,
+        },
+      });
+    });
+  }
+
+  async resolve(
+    businessAccountId: string,
+    conversationId: string,
+    admin: Admin,
+    outcome: string,
+    note?: string,
+    now = new Date(),
+  ): Promise<void> {
+    await this.prisma.$transaction(async (tx) => {
+      const conversation = await tx.conversation.updateMany({
+        where: { id: conversationId, businessAccountId, mode: ConversationMode.HUMAN },
+        data: { mode: ConversationMode.AI, humanModeStartedAt: null, humanModeExpiresAt: null },
+      });
+      if (conversation.count !== 1) {
+        throw new AppError('Conversation is not in human mode', 'NOT_HUMAN_MODE', 409);
+      }
+      const handoff = await tx.handoff.updateMany({
+        where: { conversationId, activeKey: { not: null }, conversation: { businessAccountId } },
+        data: {
+          status: HandoffStatus.RESOLVED,
+          resolvedAt: now,
+          resolvedBy: admin.id,
+          resolutionOutcome: outcome,
+          resolutionNote: note?.trim() ?? null,
+          activeKey: null,
+        },
+      });
+      if (handoff.count !== 1) {
+        throw new AppError('Active handoff was not found', 'HANDOFF_STATE_CONFLICT', 409);
+      }
+      await tx.auditLog.create({
+        data: {
+          id: newId(),
+          businessAccountId,
+          actorType: 'ADMIN',
+          actorId: admin.id,
+          action: 'HANDOFF_RESOLVED',
+          entityType: 'Conversation',
+          entityId: conversationId,
+          metadata: { outcome, hasNote: Boolean(note?.trim()), aiEnabled: true },
+        },
+      });
+      await this.notifier?.aiRestoredInTransaction?.(tx, {
+        businessAccountId,
+        conversationId,
+        automatic: false,
+        eventKey: now.toISOString(),
+      });
+    });
+    if (!this.notifier?.aiRestoredInTransaction)
+      await this.notifier?.aiRestored(conversationId, false);
   }
 
   async expireBatch(now = new Date()): Promise<number> {
@@ -226,19 +381,27 @@ export class HandoffService {
             entityId: candidate.id,
           },
         });
+        await this.notifier?.aiRestoredInTransaction?.(tx, {
+          businessAccountId: conversation.businessAccountId,
+          conversationId: candidate.id,
+          automatic: true,
+          eventKey: now.toISOString(),
+        });
         return true;
       });
       if (changed) {
         count += 1;
         this.logger.info({ conversationId: candidate.id }, 'AI mode restored automatically');
-        await this.notifier
-          ?.aiRestored(candidate.id, true)
-          .catch((error: unknown) =>
-            this.logger.error(
-              { err: error, conversationId: candidate.id },
-              'AI restore notification failed',
-            ),
-          );
+        if (!this.notifier?.aiRestoredInTransaction) {
+          await this.notifier
+            ?.aiRestored(candidate.id, true)
+            .catch((error: unknown) =>
+              this.logger.error(
+                { err: error, conversationId: candidate.id },
+                'AI restore notification failed',
+              ),
+            );
+        }
       }
     }
     return count;

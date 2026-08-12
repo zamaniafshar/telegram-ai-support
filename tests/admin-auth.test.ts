@@ -10,7 +10,7 @@ describe('admin authorization', () => {
     await expect(authorizer.requireAdmin(123n)).rejects.toMatchObject({ code: 'UNAUTHORIZED' });
   });
 
-  it('enforces role hierarchy and owner-only role management', async () => {
+  it('enforces role hierarchy for the bot entry point', async () => {
     const support = {
       id: 'support',
       telegramUserId: 1n,
@@ -27,9 +27,5 @@ describe('admin authorization', () => {
     await expect(authorizer.requireAdmin(1n, AdminRole.ADMIN)).rejects.toMatchObject({
       code: 'UNAUTHORIZED',
     });
-    expect(authorizer.canManageRole({ ...support, role: AdminRole.OWNER }, AdminRole.ADMIN)).toBe(
-      true,
-    );
-    expect(authorizer.canManageRole(support, AdminRole.ADMIN)).toBe(false);
   });
 });

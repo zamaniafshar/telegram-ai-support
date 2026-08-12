@@ -9,6 +9,8 @@ import type { Services } from '../app.js';
 import { validWebhookSecret } from '../security/webhook-secret.js';
 import { telegramUpdateSchema } from '../telegram-business/types.js';
 import { AppError } from '../utils/errors.js';
+import { registerMiniAppApi } from '../mini-app/routes.js';
+import { registerMiniAppStatic } from '../mini-app/static.js';
 
 export async function buildServer(config: AppConfig, services: Services, logger: Logger) {
   const app = Fastify({
@@ -18,7 +20,23 @@ export async function buildServer(config: AppConfig, services: Services, logger:
     requestIdHeader: 'x-request-id',
     genReqId: () => randomUUID(),
   });
-  await app.register(helmet, { global: true });
+  await app.register(helmet, {
+    global: true,
+    contentSecurityPolicy: {
+      directives: {
+        defaultSrc: ["'self'"],
+        scriptSrc: ["'self'", 'https://telegram.org'],
+        styleSrc: ["'self'"],
+        imgSrc: ["'self'", 'data:'],
+        fontSrc: ["'self'"],
+        connectSrc: ["'self'"],
+        objectSrc: ["'none'"],
+        baseUri: ["'none'"],
+        formAction: ["'self'"],
+        frameAncestors: ["'self'", 'https://web.telegram.org', 'https://*.telegram.org'],
+      },
+    },
+  });
   await app.register(sensible);
   await app.register(rateLimit, {
     global: false,
@@ -64,6 +82,9 @@ export async function buildServer(config: AppConfig, services: Services, logger:
     },
   );
 
+  await registerMiniAppApi(app, services.miniAppAuth, services.miniAppManagement);
+  registerMiniAppStatic(app);
+
   app.post(
     config.telegram.adminWebhookPath,
     {
@@ -99,8 +120,28 @@ export async function buildServer(config: AppConfig, services: Services, logger:
         ? error.statusCode
         : 500;
     const statusCode = error instanceof AppError ? error.statusCode : genericStatus;
+    const errorCode =
+      statusCode >= 500
+        ? 'INTERNAL_ERROR'
+        : error instanceof AppError
+          ? error.code === 'UNAUTHORIZED'
+            ? 'ACCESS_DENIED'
+            : error.code
+          : 'INVALID_REQUEST';
+    const message =
+      statusCode >= 500
+        ? 'خطایی در سامانه رخ داد. دوباره تلاش کنید.'
+        : statusCode === 401 || statusCode === 403
+          ? 'دسترسی شما مجاز نیست یا نشست شما پایان یافته است.'
+          : statusCode === 404
+            ? 'این مورد در دسترس نیست یا اجازه مشاهده آن را ندارید.'
+            : statusCode === 429
+              ? 'تعداد درخواست‌ها بیش از حد مجاز است. کمی بعد دوباره تلاش کنید.'
+              : statusCode === 409
+                ? 'وضعیت این مورد تغییر کرده است. صفحه را تازه کنید.'
+                : 'اطلاعات ارسال‌شده معتبر نیست.';
     return reply.code(statusCode).send({
-      error: statusCode >= 500 ? 'internal_error' : 'invalid_request',
+      error: { code: errorCode, message },
       requestId: request.id,
     });
   });

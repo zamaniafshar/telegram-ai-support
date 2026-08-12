@@ -42,6 +42,11 @@ const envSchema = z.object({
   TELEGRAM_INITIAL_ADMIN_IDS: z.string().default(''),
   TELEGRAM_MARK_READ: booleanString,
   TELEGRAM_TRANSPORT: z.enum(['webhook', 'polling']).default('webhook'),
+  MINI_APP_URL: z.union([z.literal(''), z.url()]).default(''),
+  MINI_APP_AUTH_MAX_AGE_SECONDS: positiveInt(300),
+  MINI_APP_SESSION_HOURS: z.coerce.number().int().min(1).max(24).default(8),
+  MINI_APP_DEV_ADMIN_ID: z.string().regex(/^\d+$/).optional(),
+  BUSINESS_DEFAULT_TIMEZONE: z.string().min(3).max(64).default('Asia/Tehran'),
 
   OPENAI_API_KEY: z.string().min(10),
   OPENAI_BASE_URL: z.url().default('https://nano-gpt.com/api/v1'),
@@ -50,6 +55,10 @@ const envSchema = z.object({
   OPENAI_EMBEDDING_DIMENSIONS: nonNegativeInt(0),
   OPENAI_MAX_RETRIES: z.coerce.number().int().min(0).max(10).default(3),
   OPENAI_TIMEOUT_MS: positiveInt(30_000),
+  NANOGPT_BALANCE_URL: z.url().default('https://nano-gpt.com/api/check-balance'),
+  NANOGPT_LOW_BALANCE_USD: z.coerce.number().positive().default(3),
+  NANOGPT_BALANCE_CHECK_INTERVAL_HOURS: positiveInt(24),
+  NANOGPT_INSUFFICIENT_ALERT_COOLDOWN_HOURS: positiveInt(24),
 
   QDRANT_URL: z.url(),
   QDRANT_API_KEY: z.string().default(''),
@@ -62,6 +71,10 @@ const envSchema = z.object({
   RETRIEVAL_MIN_SCORE: z.coerce.number().min(0).max(1).default(0.72),
   RETRIEVAL_LIMIT: z.coerce.number().int().min(1).max(50).default(8),
   CONVERSATION_CONTEXT_MESSAGES: z.coerce.number().int().min(0).max(30).default(8),
+  SAFE_GREETING_ENABLED: z
+    .enum(['true', 'false'])
+    .default('true')
+    .transform((value) => value === 'true'),
   MAX_CUSTOMER_MESSAGE_LENGTH: positiveInt(8_000),
   MAX_KNOWLEDGE_TITLE_LENGTH: positiveInt(200),
   MAX_KNOWLEDGE_DESCRIPTION_LENGTH: positiveInt(100_000),
@@ -121,6 +134,21 @@ export function loadConfig(source: NodeJS.ProcessEnv = process.env) {
     throw new Error('Production requires an HTTPS PUBLIC_BASE_URL');
   }
 
+  const miniAppUrl = (
+    env.MINI_APP_URL || `${env.PUBLIC_BASE_URL.replace(/\/$/, '')}/mini-app/`
+  ).replace(/\/$/, '');
+  if (env.NODE_ENV === 'production' && !miniAppUrl.startsWith('https://')) {
+    throw new Error('Production requires an HTTPS MINI_APP_URL');
+  }
+  if (env.NODE_ENV === 'production' && env.MINI_APP_DEV_ADMIN_ID) {
+    throw new Error('MINI_APP_DEV_ADMIN_ID must never be set in production');
+  }
+  try {
+    new Intl.DateTimeFormat('en-US', { timeZone: env.BUSINESS_DEFAULT_TIMEZONE }).format();
+  } catch {
+    throw new Error('BUSINESS_DEFAULT_TIMEZONE must be a valid IANA timezone');
+  }
+
   return {
     nodeEnv: env.NODE_ENV,
     http: {
@@ -146,6 +174,10 @@ export function loadConfig(source: NodeJS.ProcessEnv = process.env) {
       markRead: env.TELEGRAM_MARK_READ,
       transport: env.TELEGRAM_TRANSPORT,
       replyWindowHours: env.TELEGRAM_REPLY_WINDOW_HOURS,
+      miniAppUrl,
+      miniAppAuthMaxAgeSeconds: env.MINI_APP_AUTH_MAX_AGE_SECONDS,
+      miniAppSessionHours: env.MINI_APP_SESSION_HOURS,
+      miniAppDevAdminId: env.MINI_APP_DEV_ADMIN_ID ? BigInt(env.MINI_APP_DEV_ADMIN_ID) : undefined,
     },
     openai: {
       apiKey: env.OPENAI_API_KEY,
@@ -155,6 +187,12 @@ export function loadConfig(source: NodeJS.ProcessEnv = process.env) {
       embeddingDimensions: env.OPENAI_EMBEDDING_DIMENSIONS || undefined,
       maxRetries: env.OPENAI_MAX_RETRIES,
       timeoutMs: env.OPENAI_TIMEOUT_MS,
+    },
+    nanoGptCredit: {
+      balanceUrl: env.NANOGPT_BALANCE_URL,
+      lowBalanceUsd: env.NANOGPT_LOW_BALANCE_USD,
+      checkIntervalHours: env.NANOGPT_BALANCE_CHECK_INTERVAL_HOURS,
+      insufficientAlertCooldownHours: env.NANOGPT_INSUFFICIENT_ALERT_COOLDOWN_HOURS,
     },
     qdrant: {
       url: env.QDRANT_URL,
@@ -173,6 +211,10 @@ export function loadConfig(source: NodeJS.ProcessEnv = process.env) {
       chunkOverlapChars: env.CHUNK_OVERLAP_CHARS,
       debounceMs: env.MESSAGE_DEBOUNCE_MS,
     },
+    routing: {
+      safeGreetingEnabled: env.SAFE_GREETING_ENABLED,
+    },
+    business: { defaultTimezone: env.BUSINESS_DEFAULT_TIMEZONE },
     handoff: {
       hours: env.HANDOFF_HOURS,
       customerMessage: env.HANDOFF_CUSTOMER_MESSAGE,

@@ -1,107 +1,177 @@
-import type { PrismaClient } from '@prisma/client';
+import { createHash } from 'node:crypto';
+import {
+  NotificationDeliveryStatus,
+  NotificationSeverity,
+  type Prisma,
+  type PrismaClient,
+} from '@prisma/client';
 import type { Logger } from 'pino';
-import type { TelegramApi } from '../telegram-business/client.js';
-import type { InlineKeyboardMarkup } from '../telegram-business/types.js';
-import type { IndexingFailureNotifier } from '../indexing/service.js';
+import type { AppConfig } from '../config/env.js';
+import type { IndexingNotifier } from '../indexing/service.js';
 import type { ModeChangeNotifier } from '../handoffs/service.js';
-import { remainingDuration } from '../utils/time.js';
+import type { TelegramApi } from '../telegram-business/client.js';
+import { errorCode } from '../utils/errors.js';
+import { newId } from '../utils/ids.js';
+import { millisecondsFrom } from '../utils/time.js';
 
-export class AdminNotifier implements IndexingFailureNotifier, ModeChangeNotifier {
+type DatabaseClient = PrismaClient | Prisma.TransactionClient;
+
+export interface NotificationInput {
+  dedupeKey: string;
+  type: string;
+  severity: NotificationSeverity;
+  businessAccountId?: string;
+  relatedEntityType: string;
+  relatedEntityId: string;
+  titleFa: string;
+  summaryFa: string;
+  destinationPath: string;
+}
+
+function shortHash(value: string): string {
+  return createHash('sha256').update(value).digest('hex').slice(0, 24);
+}
+
+function businessDestination(path: string, businessAccountId: string): string {
+  return `${path}?business=${encodeURIComponent(businessAccountId)}`;
+}
+
+export class AdminNotifier implements IndexingNotifier, ModeChangeNotifier {
   constructor(
     private readonly prisma: PrismaClient,
     private readonly telegram: TelegramApi,
+    private readonly config: AppConfig,
     private readonly logger: Logger,
   ) {}
 
-  async handoffActivated(conversationId: string): Promise<void> {
-    const conversation = await this.prisma.conversation.findUniqueOrThrow({
-      where: { id: conversationId },
-      include: {
-        customer: true,
-        messages: { orderBy: { sentAt: 'desc' }, take: 6 },
-        handoffs: { where: { activeKey: { not: null } }, take: 1 },
+  async enqueue(client: DatabaseClient, input: NotificationInput): Promise<void> {
+    const notification = await client.notification.upsert({
+      where: { dedupeKey: input.dedupeKey },
+      create: {
+        id: newId(),
+        publicToken: newId(),
+        dedupeKey: input.dedupeKey,
+        type: input.type,
+        severity: input.severity,
+        businessAccountId: input.businessAccountId ?? null,
+        relatedEntityType: input.relatedEntityType,
+        relatedEntityId: input.relatedEntityId,
+        titleFa: input.titleFa,
+        summaryFa: input.summaryFa,
+        destinationPath: input.destinationPath,
       },
+      update: {},
     });
-    const handoff = conversation.handoffs[0];
-    if (!handoff) return;
-    const customerName =
-      [conversation.customer.firstName, conversation.customer.lastName].filter(Boolean).join(' ') ||
-      'بدون نام';
-    const context = [...conversation.messages]
-      .reverse()
-      .map((message) => `${message.senderType}: ${(message.text ?? '[رسانه]').slice(0, 250)}`)
-      .join('\n');
-    const latest = conversation.messages[0]?.text ?? '[پیام غیرمتنی]';
-    const replyWindow = conversation.telegramReplyWindowExpiresAt
-      ? remainingDuration(conversation.telegramReplyWindowExpiresAt)
-      : 'بسته';
-    const usernameLine = conversation.customer.username
-      ? `@${conversation.customer.username}`
-      : 'ندارد؛ گفتگو را در حساب پشتیبانی با شناسه زیر پیدا کنید.';
-    const text = [
-      '🔔 ارجاع به پشتیبانی انسانی',
-      `نام: ${customerName}`,
-      `نام کاربری: ${usernameLine}`,
-      `شناسه تلگرام: ${conversation.customer.telegramUserId.toString()}`,
-      `آخرین پیام: ${latest.slice(0, 700)}`,
-      `دلیل: ${handoff.reasonCode}${handoff.reasonDetail ? ` — ${handoff.reasonDetail}` : ''}`,
-      `زمان ارجاع: ${handoff.startedAt.toISOString()}`,
-      `پایان حالت انسانی: ${handoff.expiresAt.toISOString()}`,
-      `زمان باقی‌مانده پنجره پاسخ ربات تلگرام: ${replyWindow}`,
-      '',
-      'متن اخیر:',
-      context || 'پیامی موجود نیست.',
-      '',
-      'پاسخ را فقط از گفتگوی واقعی مشتری در حساب پشتیبانی ارسال کنید؛ ربات مدیریت امکان پاسخ به مشتری ندارد.',
-    ].join('\n');
-    const openButton = conversation.customer.username
-      ? { text: 'Open Customer Chat', url: `https://t.me/${conversation.customer.username}` }
-      : { text: 'Open Customer Chat', callback_data: `h:nochat:${conversation.id}` };
-    await this.#broadcast(conversation.businessAccountId, text, {
-      inline_keyboard: [
-        [openButton],
-        [
-          { text: 'Enable AI Now', callback_data: `h:ai:${conversation.id}` },
-          { text: 'Keep Human for Another 24 Hours', callback_data: `h:ext:${conversation.id}` },
-        ],
-        [
-          { text: 'View Recent Messages', callback_data: `h:msgs:${conversation.id}` },
-          { text: 'Acknowledge Handoff', callback_data: `h:ack:${conversation.id}` },
-        ],
-      ],
+    const recipients = await client.admin.findMany({
+      where: {
+        isActive: true,
+        ...(input.businessAccountId
+          ? { businessAccess: { some: { businessAccountId: input.businessAccountId } } }
+          : {}),
+      },
+      select: { id: true },
+    });
+    if (recipients.length === 0) return;
+    await client.notificationDelivery.createMany({
+      data: recipients.map((admin) => ({
+        id: newId(),
+        notificationId: notification.id,
+        adminId: admin.id,
+      })),
+      skipDuplicates: true,
     });
   }
 
-  async additionalCustomerMessage(conversationId: string, message: string): Promise<void> {
+  async handoffActivatedInTransaction(
+    client: Prisma.TransactionClient,
+    input: { businessAccountId: string; conversationId: string; handoffId: string },
+  ): Promise<void> {
+    await this.enqueue(client, {
+      dedupeKey: `HANDOFF_ACTIVATED:${input.handoffId}`,
+      type: 'HANDOFF_ACTIVATED',
+      severity: NotificationSeverity.WARNING,
+      businessAccountId: input.businessAccountId,
+      relatedEntityType: 'Conversation',
+      relatedEntityId: input.conversationId,
+      titleFa: '🔔 ارجاع جدید',
+      summaryFa: 'پیام مشتری برای بررسی انسانی ارجاع شد.',
+      destinationPath: businessDestination(
+        `/handoffs/${input.conversationId}`,
+        input.businessAccountId,
+      ),
+    });
+  }
+
+  async additionalCustomerMessage(conversationId: string, _message: string): Promise<void> {
+    void _message;
     const conversation = await this.prisma.conversation.findUniqueOrThrow({
       where: { id: conversationId },
-      include: { customer: true },
+      include: { messages: { orderBy: { sentAt: 'desc' }, take: 1, select: { id: true } } },
     });
-    await this.#broadcast(
-      conversation.businessAccountId,
-      `پیام جدید در گفتگوی انسانی از ${conversation.customer.telegramUserId.toString()}:\n${message.slice(0, 1500)}`,
-      {
-        inline_keyboard: [
-          [
-            { text: 'View Recent Messages', callback_data: `h:msgs:${conversation.id}` },
-            { text: 'Enable AI Now', callback_data: `h:ai:${conversation.id}` },
-          ],
-        ],
-      },
-    );
+    const messageId = conversation.messages[0]?.id ?? shortHash(`${conversationId}:${Date.now()}`);
+    await this.enqueue(this.prisma, {
+      dedupeKey: `HANDOFF_MESSAGE:${messageId}`,
+      type: 'HANDOFF_MESSAGE',
+      severity: NotificationSeverity.INFO,
+      businessAccountId: conversation.businessAccountId,
+      relatedEntityType: 'Conversation',
+      relatedEntityId: conversation.id,
+      titleFa: '💬 پیام جدید در ارجاع',
+      summaryFa: 'مشتری در گفتگوی تحت رسیدگی پیام تازه‌ای فرستاد.',
+      destinationPath: businessDestination(
+        `/handoffs/${conversation.id}`,
+        conversation.businessAccountId,
+      ),
+    });
   }
 
   async aiRestored(conversationId: string, automatic: boolean): Promise<void> {
     const conversation = await this.prisma.conversation.findUniqueOrThrow({
       where: { id: conversationId },
-      include: { customer: true },
     });
-    await this.#broadcast(
-      conversation.businessAccountId,
-      `${automatic ? '⏱' : '✅'} حالت هوش مصنوعی برای گفتگوی ${conversation.customer.telegramUserId.toString()} ${
-        automatic ? 'پس از پایان ۲۴ ساعت به‌طور خودکار' : 'به‌صورت دستی'
-      } فعال شد. پیامی برای مشتری ارسال نشد.`,
-    );
+    await this.enqueue(this.prisma, {
+      dedupeKey: `AI_RESTORED:${conversation.id}:${conversation.updatedAt.toISOString()}`,
+      type: 'AI_RESTORED',
+      severity: NotificationSeverity.SUCCESS,
+      businessAccountId: conversation.businessAccountId,
+      relatedEntityType: 'Conversation',
+      relatedEntityId: conversation.id,
+      titleFa: '✅ پاسخ‌گویی هوشمند فعال شد',
+      summaryFa: automatic
+        ? 'حالت هوشمند پس از پایان زمان ارجاع دوباره فعال شد.'
+        : 'حالت هوشمند برای گفتگو دوباره فعال شد.',
+      destinationPath: businessDestination(
+        `/conversations/${conversation.id}`,
+        conversation.businessAccountId,
+      ),
+    });
+  }
+
+  async aiRestoredInTransaction(
+    client: Prisma.TransactionClient,
+    input: {
+      businessAccountId: string;
+      conversationId: string;
+      automatic: boolean;
+      eventKey: string;
+    },
+  ): Promise<void> {
+    await this.enqueue(client, {
+      dedupeKey: `AI_RESTORED:${input.conversationId}:${input.eventKey}`,
+      type: 'AI_RESTORED',
+      severity: NotificationSeverity.SUCCESS,
+      businessAccountId: input.businessAccountId,
+      relatedEntityType: 'Conversation',
+      relatedEntityId: input.conversationId,
+      titleFa: '✅ پاسخ‌گویی هوشمند فعال شد',
+      summaryFa: input.automatic
+        ? 'حالت هوشمند پس از پایان زمان ارجاع دوباره فعال شد.'
+        : 'حالت هوشمند برای گفتگو دوباره فعال شد.',
+      destinationPath: businessDestination(
+        `/conversations/${input.conversationId}`,
+        input.businessAccountId,
+      ),
+    });
   }
 
   async indexingFailed(input: {
@@ -109,50 +179,235 @@ export class AdminNotifier implements IndexingFailureNotifier, ModeChangeNotifie
     knowledgeId: string;
     title: string;
     errorCode: string;
+    knowledgeVersion?: number;
   }): Promise<void> {
-    await this.#broadcast(
-      input.businessAccountId,
-      `❌ نمایه‌سازی دانش «${input.title}» ناموفق شد. کد خطا: ${input.errorCode}`,
-      {
-        inline_keyboard: [
-          [{ text: 'Retry Indexing', callback_data: `k:retry:${input.knowledgeId}` }],
-        ],
-      },
-    );
+    await this.enqueue(this.prisma, {
+      dedupeKey: `INDEXING_FAILED:${input.knowledgeId}:${input.knowledgeVersion ?? 'current'}:${shortHash(input.errorCode)}`,
+      type: 'INDEXING_FAILED',
+      severity: NotificationSeverity.ERROR,
+      businessAccountId: input.businessAccountId,
+      relatedEntityType: 'KnowledgeItem',
+      relatedEntityId: input.knowledgeId,
+      titleFa: '❌ خطا در پردازش دانش',
+      summaryFa: `نمایه‌سازی «${input.title.slice(0, 150)}» انجام نشد.`,
+      destinationPath: businessDestination(
+        `/knowledge/${input.knowledgeId}`,
+        input.businessAccountId,
+      ),
+    });
+  }
+
+  async indexingFailedInTransaction(
+    client: Prisma.TransactionClient,
+    input: {
+      businessAccountId: string;
+      knowledgeId: string;
+      title: string;
+      errorCode: string;
+      knowledgeVersion?: number;
+    },
+  ): Promise<void> {
+    await this.enqueue(client, {
+      dedupeKey: `INDEXING_FAILED:${input.knowledgeId}:${input.knowledgeVersion ?? 'current'}:${shortHash(input.errorCode)}`,
+      type: 'INDEXING_FAILED',
+      severity: NotificationSeverity.ERROR,
+      businessAccountId: input.businessAccountId,
+      relatedEntityType: 'KnowledgeItem',
+      relatedEntityId: input.knowledgeId,
+      titleFa: '❌ خطا در پردازش دانش',
+      summaryFa: `نمایه‌سازی «${input.title.slice(0, 150)}» انجام نشد.`,
+      destinationPath: businessDestination(
+        `/knowledge/${input.knowledgeId}`,
+        input.businessAccountId,
+      ),
+    });
+  }
+
+  async indexingSucceeded(input: {
+    businessAccountId: string;
+    knowledgeId: string;
+    title: string;
+    chunkCount: number;
+    knowledgeVersion?: number;
+  }): Promise<void> {
+    await this.enqueue(this.prisma, {
+      dedupeKey: `INDEXING_SUCCEEDED:${input.knowledgeId}:${input.knowledgeVersion ?? 'current'}`,
+      type: 'INDEXING_SUCCEEDED',
+      severity: NotificationSeverity.SUCCESS,
+      businessAccountId: input.businessAccountId,
+      relatedEntityType: 'KnowledgeItem',
+      relatedEntityId: input.knowledgeId,
+      titleFa: '✅ دانش آماده استفاده است',
+      summaryFa: `«${input.title.slice(0, 150)}» با موفقیت منتشر شد.`,
+      destinationPath: businessDestination(
+        `/knowledge/${input.knowledgeId}`,
+        input.businessAccountId,
+      ),
+    });
+  }
+
+  async indexingSucceededInTransaction(
+    client: Prisma.TransactionClient,
+    input: {
+      businessAccountId: string;
+      knowledgeId: string;
+      title: string;
+      chunkCount: number;
+      knowledgeVersion?: number;
+    },
+  ): Promise<void> {
+    await this.enqueue(client, {
+      dedupeKey: `INDEXING_SUCCEEDED:${input.knowledgeId}:${input.knowledgeVersion ?? 'current'}`,
+      type: 'INDEXING_SUCCEEDED',
+      severity: NotificationSeverity.SUCCESS,
+      businessAccountId: input.businessAccountId,
+      relatedEntityType: 'KnowledgeItem',
+      relatedEntityId: input.knowledgeId,
+      titleFa: '✅ دانش آماده استفاده است',
+      summaryFa: `«${input.title.slice(0, 150)}» با موفقیت منتشر شد.`,
+      destinationPath: businessDestination(
+        `/knowledge/${input.knowledgeId}`,
+        input.businessAccountId,
+      ),
+    });
   }
 
   async systemAttention(businessAccountId: string, text: string): Promise<void> {
-    await this.#broadcast(businessAccountId, `⚠️ نیاز به بررسی مدیر:\n${text.slice(0, 2000)}`);
+    await this.enqueue(this.prisma, {
+      dedupeKey: `SYSTEM_ATTENTION:${businessAccountId}:${shortHash(text)}`,
+      type: 'SYSTEM_ATTENTION',
+      severity: NotificationSeverity.ERROR,
+      businessAccountId,
+      relatedEntityType: 'System',
+      relatedEntityId: businessAccountId,
+      titleFa: '⚠️ سامانه نیازمند بررسی است',
+      summaryFa: 'یک اختلال عملیاتی بر پاسخ‌گویی سامانه اثر گذاشته است.',
+      destinationPath: businessDestination('/system', businessAccountId),
+    });
   }
 
-  async #broadcast(
-    businessAccountId: string,
-    text: string,
-    replyMarkup?: InlineKeyboardMarkup,
-  ): Promise<void> {
-    const recipients = await this.prisma.admin.findMany({
-      where: {
-        isActive: true,
-        businessAccess: { some: { businessAccountId } },
-      },
-      select: { telegramUserId: true },
+  async nanoGptLowBalance(_balanceUsd: string, _thresholdUsd: number): Promise<void> {
+    void _balanceUsd;
+    void _thresholdUsd;
+    const day = new Date().toISOString().slice(0, 10);
+    await this.enqueue(this.prisma, {
+      dedupeKey: `PROVIDER_LOW_BALANCE:${day}`,
+      type: 'PROVIDER_LOW_BALANCE',
+      severity: NotificationSeverity.WARNING,
+      relatedEntityType: 'System',
+      relatedEntityId: 'provider-credit',
+      titleFa: '⚠️ اعتبار سرویس رو به پایان است',
+      summaryFa: 'اعتبار باقی‌مانده از حد تعیین‌شده کمتر است.',
+      destinationPath: '/system',
     });
-    const results = await Promise.allSettled(
-      recipients.map((admin) =>
-        this.telegram.sendMessage(
-          admin.telegramUserId,
-          text.slice(0, 4_000),
-          replyMarkup ? { replyMarkup } : {},
-        ),
-      ),
-    );
-    results.forEach((result, index) => {
-      if (result.status === 'rejected') {
+  }
+
+  async nanoGptInsufficientBalance(_balanceUsd: string): Promise<void> {
+    void _balanceUsd;
+    const day = new Date().toISOString().slice(0, 10);
+    await this.enqueue(this.prisma, {
+      dedupeKey: `PROVIDER_INSUFFICIENT_BALANCE:${day}`,
+      type: 'PROVIDER_INSUFFICIENT_BALANCE',
+      severity: NotificationSeverity.ERROR,
+      relatedEntityType: 'System',
+      relatedEntityId: 'provider-credit',
+      titleFa: '🚨 پاسخ‌گویی هوشمند با اختلال روبه‌رو است',
+      summaryFa: 'اعتبار سرویس برای پردازش درخواست‌ها کافی نیست.',
+      destinationPath: '/system',
+    });
+  }
+
+  async runBatch(workerId: string): Promise<number> {
+    const now = new Date();
+    const candidates = await this.prisma.notificationDelivery.findMany({
+      where: {
+        status: {
+          in: [
+            NotificationDeliveryStatus.PENDING,
+            NotificationDeliveryStatus.RETRY,
+            NotificationDeliveryStatus.PROCESSING,
+          ],
+        },
+        availableAt: { lte: now },
+        OR: [{ leaseExpiresAt: null }, { leaseExpiresAt: { lt: now } }],
+      },
+      orderBy: { availableAt: 'asc' },
+      take: this.config.worker.batchSize,
+      select: { id: true },
+    });
+    let processed = 0;
+    for (const candidate of candidates) {
+      const claimed = await this.prisma.notificationDelivery.updateMany({
+        where: {
+          id: candidate.id,
+          status: {
+            in: [
+              NotificationDeliveryStatus.PENDING,
+              NotificationDeliveryStatus.RETRY,
+              NotificationDeliveryStatus.PROCESSING,
+            ],
+          },
+          OR: [{ leaseExpiresAt: null }, { leaseExpiresAt: { lt: now } }],
+        },
+        data: {
+          status: NotificationDeliveryStatus.PROCESSING,
+          attempts: { increment: 1 },
+          leaseOwner: workerId,
+          leaseExpiresAt: millisecondsFrom(now, this.config.worker.leaseMs),
+        },
+      });
+      if (claimed.count !== 1) continue;
+      processed += 1;
+      const delivery = await this.prisma.notificationDelivery.findUniqueOrThrow({
+        where: { id: candidate.id },
+        include: { notification: true, admin: true },
+      });
+      try {
+        const destination = `${this.config.telegram.miniAppUrl}${delivery.notification.destinationPath}`;
+        const buttonText = delivery.notification.type.startsWith('AI_MASTER_')
+          ? 'مشاهده تنظیمات'
+          : 'مشاهده جزئیات';
+        const sent = await this.telegram.sendMessage(
+          delivery.admin.telegramUserId,
+          `${delivery.notification.titleFa}\n${delivery.notification.summaryFa}`,
+          {
+            replyMarkup: {
+              inline_keyboard: [[{ text: buttonText, web_app: { url: destination } }]],
+            },
+          },
+        );
+        await this.prisma.notificationDelivery.update({
+          where: { id: delivery.id },
+          data: {
+            status: NotificationDeliveryStatus.DELIVERED,
+            telegramMessageId: BigInt(sent.message_id),
+            deliveredAt: new Date(),
+            leaseOwner: null,
+            leaseExpiresAt: null,
+            lastErrorCode: null,
+          },
+        });
+      } catch (error) {
+        const terminal = delivery.attempts >= delivery.maxAttempts;
+        await this.prisma.notificationDelivery.update({
+          where: { id: delivery.id },
+          data: {
+            status: terminal ? NotificationDeliveryStatus.FAILED : NotificationDeliveryStatus.RETRY,
+            availableAt: millisecondsFrom(
+              new Date(),
+              Math.min(3_600_000, 2 ** delivery.attempts * 1_000),
+            ),
+            leaseOwner: null,
+            leaseExpiresAt: null,
+            lastErrorCode: errorCode(error),
+          },
+        });
         this.logger.error(
-          { err: result.reason, adminTelegramId: recipients[index]?.telegramUserId.toString() },
-          'admin notification failed',
+          { err: error, notificationDeliveryId: delivery.id, attempt: delivery.attempts },
+          'admin notification delivery failed',
         );
       }
-    });
+    }
+    return processed;
   }
 }

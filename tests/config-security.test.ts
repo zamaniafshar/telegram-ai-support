@@ -10,7 +10,16 @@ describe('configuration and security boundaries', () => {
     expect(config.telegram.ownerId).toBe(9007199254740991n);
     expect(config.telegram.businessWebhookSecret).not.toBe(config.telegram.adminWebhookSecret);
     expect(config.openai.baseUrl).toBe('https://nano-gpt.com/api/v1');
+    expect(config.nanoGptCredit.lowBalanceUsd).toBe(3);
+    expect(config.nanoGptCredit.checkIntervalHours).toBe(24);
     expect(config.handoff.customerMessageEnabled).toBe(false);
+    expect(config.routing.safeGreetingEnabled).toBe(true);
+    expect(config.telegram.miniAppUrl).toBe('https://example.test/mini-app');
+    expect(config.telegram.miniAppAuthMaxAgeSeconds).toBe(300);
+  });
+
+  it('can disable predefined greeting replies', () => {
+    expect(testConfig({ SAFE_GREETING_ENABLED: 'false' }).routing.safeGreetingEnabled).toBe(false);
   });
 
   it('can explicitly restore the handoff customer message', () => {
@@ -23,6 +32,15 @@ describe('configuration and security boundaries', () => {
     expect(() => testConfig({ NODE_ENV: 'production', TELEGRAM_TRANSPORT: 'polling' })).toThrow(
       /Production requires/,
     );
+  });
+
+  it('allows an explicit local Mini App admin in development but rejects it in production', () => {
+    expect(testConfig({ MINI_APP_DEV_ADMIN_ID: '123456789' }).telegram.miniAppDevAdminId).toBe(
+      123456789n,
+    );
+    expect(() =>
+      testConfig({ NODE_ENV: 'production', MINI_APP_DEV_ADMIN_ID: '123456789' }),
+    ).toThrow(/must never be set in production/);
   });
 
   it('rejects reused webhook secrets', () => {

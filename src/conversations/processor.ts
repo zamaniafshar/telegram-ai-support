@@ -6,16 +6,17 @@ import {
 } from '@prisma/client';
 import type { Logger } from 'pino';
 import type { AppConfig } from '../config/env.js';
-import type { GroundedAnswerer } from '../ai/openai.js';
+import { PROMPT_VERSION, type GroundedAnswerer } from '../ai/openai.js';
 import type { RetrievalService } from '../retrieval/service.js';
 import type { HandoffService } from '../handoffs/service.js';
 import type { BusinessMessenger } from '../telegram-business/messenger.js';
 import type { AdminNotifier } from '../telegram-admin/notifier.js';
 import { preModelRoute, shouldHandoffExternalFailure } from './routing.js';
 import { millisecondsFrom } from '../utils/time.js';
-import { errorCode, safeErrorDetail } from '../utils/errors.js';
+import { AppError, errorCode, safeErrorDetail } from '../utils/errors.js';
 import { newId } from '../utils/ids.js';
 import { tryAcquireConversationLease } from '../workers/conversation-lease.js';
+import type { AiAvailabilityReason, AiAvailabilityService } from '../ai/availability.js';
 
 export class ConversationProcessor {
   constructor(
@@ -25,6 +26,7 @@ export class ConversationProcessor {
     private readonly handoffs: HandoffService,
     private readonly messenger: BusinessMessenger,
     private readonly notifier: AdminNotifier,
+    private readonly availability: AiAvailabilityService,
     private readonly config: AppConfig,
     private readonly logger: Logger,
   ) {}
@@ -132,7 +134,22 @@ export class ConversationProcessor {
       await this.#retryJob(job, 'CONVERSATION_PENDING_HANDOFF', 1_000);
       return;
     }
-    const initialRoute = preModelRoute(customerText);
+    const initialAvailability = await this.availability.check({
+      businessAccountId: conversation.businessAccountId,
+      conversationId: conversation.id,
+    });
+    if (!initialAvailability.available) {
+      await this.#suppress(
+        job,
+        message.id,
+        conversation.businessAccountId,
+        initialAvailability.reason,
+      );
+      return;
+    }
+    const initialRoute = preModelRoute(customerText, {
+      safeGreetingEnabled: this.config.routing.safeGreetingEnabled,
+    });
     if (initialRoute.kind === 'HANDOFF') {
       await this.#recordDecision(job, false, 1, 'Customer explicitly requested a human', [], [], 0);
       await this.#activateHandoff(
@@ -156,31 +173,16 @@ export class ConversationProcessor {
         0,
         initialRoute.answer,
       );
-      await this.messenger.sendAiAnswer(conversation.id, initialRoute.answer, message.id);
+      if (
+        !(await this.#sendIfAvailable(job, conversation.businessAccountId, initialRoute.answer))
+      ) {
+        return;
+      }
       await this.#complete(job, message.id);
       return;
     }
 
     const retrieved = await this.retrieval.search(conversation.businessAccountId, customerText);
-    if (preModelRoute(customerText, retrieved).kind === 'HANDOFF') {
-      await this.#recordDecision(
-        job,
-        false,
-        0,
-        'No current knowledge met the retrieval threshold',
-        [],
-        [],
-        0,
-      );
-      await this.#activateHandoff(
-        conversation.id,
-        'NO_RELEVANT_KNOWLEDGE',
-        'No retrieval result met threshold',
-        message.id,
-      );
-      await this.#complete(job, message.id);
-      return;
-    }
     const context = conversation.messages
       .filter((contextMessage) => contextMessage.id !== message.id && contextMessage.text)
       .reverse()
@@ -214,8 +216,87 @@ export class ConversationProcessor {
       await this.#complete(job, message.id);
       return;
     }
-    await this.messenger.sendAiAnswer(conversation.id, decision.answer, message.id);
+    if (!(await this.#sendIfAvailable(job, conversation.businessAccountId, decision.answer))) {
+      return;
+    }
     await this.#complete(job, message.id);
+  }
+
+  async #sendIfAvailable(
+    job: ConversationJob,
+    businessAccountId: string,
+    answer: string,
+  ): Promise<boolean> {
+    const finalAvailability = await this.availability.check({
+      businessAccountId,
+      conversationId: job.conversationId,
+      includeTelegramChecks: true,
+    });
+    if (!finalAvailability.available) {
+      const existingSendError: Partial<Record<AiAvailabilityReason, string>> = {
+        CONNECTION_DISABLED: 'BUSINESS_CONNECTION_DISABLED',
+        CAN_REPLY_MISSING: 'BUSINESS_CAN_REPLY_MISSING',
+        TELEGRAM_REPLY_WINDOW_EXPIRED: 'TELEGRAM_REPLY_WINDOW_EXPIRED',
+      };
+      const code = existingSendError[finalAvailability.reason];
+      if (code) throw new AppError('AI send is unavailable', code, 409);
+      await this.#suppress(job, job.messageId, businessAccountId, finalAvailability.reason);
+      return false;
+    }
+    await this.messenger.sendAiAnswer(job.conversationId, answer, job.messageId);
+    return true;
+  }
+
+  async #suppress(
+    job: ConversationJob,
+    messageId: string,
+    businessAccountId: string,
+    reason: AiAvailabilityReason,
+  ): Promise<void> {
+    if (reason === 'AVAILABLE') return;
+    const outcome =
+      reason === 'MASTER_DISABLED'
+        ? 'AI_MASTER_DISABLED'
+        : reason === 'OUTSIDE_WORKING_HOURS'
+          ? 'AI_OUTSIDE_WORKING_HOURS'
+          : reason;
+    const auditAction =
+      reason === 'MASTER_DISABLED'
+        ? 'AI_RESPONSE_SUPPRESSED_MASTER_DISABLED'
+        : reason === 'OUTSIDE_WORKING_HOURS'
+          ? 'AI_RESPONSE_SUPPRESSED_OUTSIDE_WORKING_HOURS'
+          : 'AI_RESPONSE_SUPPRESSED_UNAVAILABLE';
+    await this.#recordDecision(job, false, 1, outcome, [], [], 0, null);
+    await this.prisma.$transaction([
+      this.prisma.auditLog.create({
+        data: {
+          id: newId(),
+          businessAccountId,
+          actorType: 'SYSTEM',
+          action: auditAction,
+          entityType: 'Message',
+          entityId: messageId,
+          metadata: { reason, policy: 'SILENT' },
+        },
+      }),
+      this.prisma.conversationJob.update({
+        where: { id: job.id },
+        data: {
+          status: MessageProcessingStatus.PROCESSED,
+          leaseOwner: null,
+          leaseExpiresAt: null,
+          lastErrorCode: outcome,
+        },
+      }),
+      this.prisma.message.update({
+        where: { id: messageId },
+        data: { processingStatus: MessageProcessingStatus.PROCESSED, processingErrorCode: outcome },
+      }),
+    ]);
+    this.logger.info(
+      { messageId, businessAccountId, reason },
+      'AI response intentionally suppressed',
+    );
   }
 
   async #activateHandoff(
@@ -251,7 +332,6 @@ export class ConversationProcessor {
           });
         });
     }
-    await this.notifier.handoffActivated(conversationId);
   }
 
   async #recordDecision(
@@ -281,7 +361,7 @@ export class ConversationProcessor {
         supportingChunkIds,
         retrievalResults,
         model,
-        promptVersion: 'grounded-v1',
+        promptVersion: PROMPT_VERSION,
         latencyMs,
         ...(inputTokens === undefined ? {} : { inputTokens }),
         ...(outputTokens === undefined ? {} : { outputTokens }),
@@ -365,7 +445,7 @@ export class ConversationProcessor {
         supportingChunkIds: [],
         retrievalResults: [],
         model: this.config.openai.chatModel,
-        promptVersion: 'grounded-v1',
+        promptVersion: PROMPT_VERSION,
         latencyMs: 0,
         errorCode: code,
       },

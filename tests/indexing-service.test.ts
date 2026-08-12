@@ -82,12 +82,17 @@ function indexingHarness(failUpsert = false) {
 describe('Qdrant indexing and replacement', () => {
   it('upserts current chunks then removes obsolete knowledge versions', async () => {
     const harness = indexingHarness();
+    const notifier = {
+      indexingSucceeded: vi.fn().mockResolvedValue(undefined),
+      indexingFailed: vi.fn().mockResolvedValue(undefined),
+    };
     const service = new IndexingService(
       harness.prisma as never,
       harness.embeddings,
       harness.vectors as never,
       testConfig(),
       silentLogger,
+      notifier,
     );
     expect(await service.runBatch('worker')).toBe(1);
     expect(harness.vectors.upsert).toHaveBeenCalledOnce();
@@ -95,6 +100,13 @@ describe('Qdrant indexing and replacement', () => {
     expect(harness.prisma.indexingJob.update).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({ status: IndexingJobStatus.COMPLETED }),
+      }),
+    );
+    expect(notifier.indexingSucceeded).toHaveBeenCalledWith(
+      expect.objectContaining({
+        businessAccountId: 'business-1',
+        knowledgeId: 'knowledge-1',
+        title: 'Approved title',
       }),
     );
   });

@@ -1,0 +1,1082 @@
+import {
+  AdminRole,
+  HandoffStatus,
+  IndexingStatus,
+  NotificationSeverity,
+  type Prisma,
+  type PrismaClient,
+} from '@prisma/client';
+import type { AppConfig } from '../config/env.js';
+import type { HandoffService } from '../handoffs/service.js';
+import { chunkKnowledge } from '../knowledge/chunker.js';
+import type { KnowledgeService } from '../knowledge/service.js';
+import type { HealthService } from '../observability/health.js';
+import {
+  AppError,
+  AuthorizationError,
+  ResourceUnavailableError,
+  ValidationError,
+} from '../utils/errors.js';
+import { newId } from '../utils/ids.js';
+import type { MiniAppSessionContext } from './auth.js';
+import { requireBusiness, requireOwner, requireRole } from './authorization.js';
+import {
+  defaultWeeklySchedule,
+  validIanaTimezone,
+  validateWeeklySchedule,
+  type AiAvailabilityService,
+  type WeeklySchedule,
+} from '../ai/availability.js';
+import type { AdminNotifier } from '../telegram-admin/notifier.js';
+
+const adminSelect = {
+  id: true,
+  telegramUserId: true,
+  displayName: true,
+  role: true,
+  isActive: true,
+  updatedAt: true,
+} as const;
+
+function customerName(customer: { firstName: string | null; lastName: string | null }): string {
+  return [customer.firstName, customer.lastName].filter(Boolean).join(' ') || 'بدون نام';
+}
+
+export class MiniAppManagementService {
+  constructor(
+    private readonly prisma: PrismaClient,
+    private readonly knowledge: KnowledgeService,
+    private readonly handoffs: HandoffService,
+    private readonly health: HealthService,
+    private readonly config: AppConfig,
+    private readonly availability?: AiAvailabilityService,
+    private readonly notifier?: AdminNotifier,
+  ) {}
+
+  businesses(context: MiniAppSessionContext) {
+    return context.businessAccess
+      .filter((access) => access.businessAccount.isActive)
+      .map((access) => ({
+        id: access.businessAccount.id,
+        name: access.businessAccount.name,
+        locale: access.businessAccount.defaultLocale,
+      }));
+  }
+
+  async dashboard(context: MiniAppSessionContext, businessAccountId: string) {
+    const business = requireBusiness(context, businessAccountId);
+    const [
+      waitingHandoffs,
+      humanConversations,
+      failedKnowledge,
+      conversationsToday,
+      connection,
+      recent,
+    ] = await Promise.all([
+      this.prisma.handoff.count({
+        where: {
+          activeKey: { not: null },
+          status: { in: [HandoffStatus.WAITING, HandoffStatus.ACKNOWLEDGED] },
+          conversation: { businessAccountId },
+        },
+      }),
+      this.prisma.conversation.count({ where: { businessAccountId, mode: 'HUMAN' } }),
+      context.admin.role === AdminRole.SUPPORT
+        ? Promise.resolve(0)
+        : this.prisma.knowledgeItem.count({
+            where: { businessAccountId, deletedAt: null, indexingStatus: IndexingStatus.FAILED },
+          }),
+      this.prisma.conversation.count({
+        where: {
+          businessAccountId,
+          updatedAt: { gte: new Date(Date.now() - 24 * 60 * 60_000) },
+        },
+      }),
+      this.prisma.businessConnection.findFirst({
+        where: { businessAccountId },
+        orderBy: { updatedAt: 'desc' },
+        select: { enabled: true, canReply: true, updatedAt: true },
+      }),
+      this.prisma.handoff.findMany({
+        where: { activeKey: { not: null }, conversation: { businessAccountId } },
+        orderBy: { startedAt: 'asc' },
+        take: 5,
+        include: { conversation: { include: { customer: true } } },
+      }),
+    ]);
+    return {
+      business: {
+        id: business.id,
+        name: business.name,
+        locale: business.defaultLocale,
+      },
+      metrics: { waitingHandoffs, humanConversations, failedKnowledge, conversationsToday },
+      connection: connection
+        ? {
+            status: connection.enabled && connection.canReply ? 'READY' : 'ATTENTION',
+            ...connection,
+          }
+        : { status: 'MISSING', enabled: false, canReply: false, updatedAt: null },
+      recentHandoffs: recent.map((handoff) => ({
+        id: handoff.id,
+        conversationId: handoff.conversationId,
+        status: handoff.status,
+        customerName: customerName(handoff.conversation.customer),
+        startedAt: handoff.startedAt,
+        expiresAt: handoff.expiresAt,
+        claimed: Boolean(handoff.claimedBy),
+      })),
+    };
+  }
+
+  async listHandoffs(
+    context: MiniAppSessionContext,
+    businessAccountId: string,
+    options: { status?: string | undefined; query?: string | undefined },
+  ) {
+    requireBusiness(context, businessAccountId);
+    const statuses = options.status
+      ? options.status
+          .split(',')
+          .filter((value): value is HandoffStatus =>
+            Object.values(HandoffStatus).includes(value as HandoffStatus),
+          )
+      : [];
+    const items = await this.prisma.handoff.findMany({
+      where: {
+        conversation: {
+          businessAccountId,
+          ...(options.query
+            ? {
+                customer: {
+                  OR: [
+                    { firstName: { contains: options.query } },
+                    { lastName: { contains: options.query } },
+                    { username: { contains: options.query } },
+                  ],
+                },
+              }
+            : {}),
+        },
+        ...(statuses.length ? { status: { in: statuses } } : {}),
+      },
+      orderBy: { startedAt: 'desc' },
+      take: 100,
+      include: { conversation: { include: { customer: true } } },
+    });
+    return items.map((item) => ({
+      id: item.id,
+      conversationId: item.conversationId,
+      status: item.status,
+      reasonCode: item.reasonCode,
+      startedAt: item.startedAt,
+      expiresAt: item.expiresAt,
+      claimedBy: item.claimedBy,
+      customer: {
+        name: customerName(item.conversation.customer),
+        username: item.conversation.customer.username,
+        telegramUserId: item.conversation.customer.telegramUserId.toString(),
+      },
+      mode: item.conversation.mode,
+    }));
+  }
+
+  async handoffDetails(
+    context: MiniAppSessionContext,
+    businessAccountId: string,
+    conversationId: string,
+  ) {
+    requireBusiness(context, businessAccountId);
+    const conversation = await this.prisma.conversation.findFirst({
+      where: { id: conversationId, businessAccountId },
+      include: {
+        customer: true,
+        handoffs: { orderBy: { startedAt: 'desc' }, take: 10 },
+        messages: {
+          where: { deletedAt: null },
+          orderBy: { sentAt: 'desc' },
+          take: 30,
+          select: { id: true, senderType: true, text: true, sentAt: true, editedAt: true },
+        },
+      },
+    });
+    if (!conversation) throw new ResourceUnavailableError();
+    const active = conversation.handoffs.find((handoff) => handoff.activeKey !== null) ?? null;
+    return {
+      id: conversation.id,
+      mode: conversation.mode,
+      humanModeExpiresAt: conversation.humanModeExpiresAt,
+      replyWindowExpiresAt: conversation.telegramReplyWindowExpiresAt,
+      customer: {
+        name: customerName(conversation.customer),
+        username: conversation.customer.username,
+        telegramUserId: conversation.customer.telegramUserId.toString(),
+        languageCode: conversation.customer.languageCode,
+      },
+      activeHandoff: active,
+      history: conversation.handoffs,
+      messages: [...conversation.messages].reverse(),
+      capabilities: {
+        canClaim: Boolean(active && !active.claimedBy),
+        canAcknowledge: active?.status === HandoffStatus.WAITING,
+        canExtend: Boolean(active && conversation.mode === 'HUMAN'),
+        canResolve: Boolean(active && conversation.mode === 'HUMAN'),
+        canEnableAi: conversation.mode === 'HUMAN',
+      },
+    };
+  }
+
+  async listConversations(
+    context: MiniAppSessionContext,
+    businessAccountId: string,
+    options: { mode?: string | undefined; query?: string | undefined },
+  ) {
+    requireBusiness(context, businessAccountId);
+    const modes = ['AI', 'PENDING_HUMAN', 'HUMAN'] as const;
+    const mode = modes.find((value) => value === options.mode);
+    const conversations = await this.prisma.conversation.findMany({
+      where: {
+        businessAccountId,
+        ...(mode ? { mode } : {}),
+        ...(options.query
+          ? {
+              OR: [
+                {
+                  customer: {
+                    OR: [
+                      { firstName: { contains: options.query } },
+                      { lastName: { contains: options.query } },
+                      { username: { contains: options.query } },
+                    ],
+                  },
+                },
+                { messages: { some: { deletedAt: null, text: { contains: options.query } } } },
+              ],
+            }
+          : {}),
+      },
+      orderBy: { updatedAt: 'desc' },
+      take: 100,
+      include: {
+        customer: true,
+        messages: {
+          where: { deletedAt: null },
+          orderBy: { sentAt: 'desc' },
+          take: 1,
+          select: { text: true, sentAt: true, senderType: true, processingStatus: true },
+        },
+        handoffs: { where: { activeKey: { not: null } }, take: 1 },
+      },
+    });
+    return conversations.map((conversation) => ({
+      id: conversation.id,
+      customer: {
+        name: customerName(conversation.customer),
+        username: conversation.customer.username,
+      },
+      mode: conversation.mode,
+      updatedAt: conversation.updatedAt,
+      replyWindowExpiresAt: conversation.telegramReplyWindowExpiresAt,
+      lastMessage: conversation.messages[0] ?? null,
+      hasActiveHandoff: conversation.handoffs.length > 0,
+    }));
+  }
+
+  async conversationDetails(
+    context: MiniAppSessionContext,
+    businessAccountId: string,
+    conversationId: string,
+  ) {
+    requireBusiness(context, businessAccountId);
+    const conversation = await this.prisma.conversation.findFirst({
+      where: { id: conversationId, businessAccountId },
+      include: {
+        customer: true,
+        messages: {
+          where: { deletedAt: null },
+          orderBy: { sentAt: 'desc' },
+          take: 100,
+          select: {
+            id: true,
+            senderType: true,
+            direction: true,
+            text: true,
+            sentAt: true,
+            editedAt: true,
+            processingStatus: true,
+            processingErrorCode: true,
+          },
+        },
+        handoffs: { orderBy: { startedAt: 'desc' }, take: 20 },
+        aiDecisions: { orderBy: { createdAt: 'desc' }, take: 30 },
+      },
+    });
+    if (!conversation) throw new ResourceUnavailableError();
+    const showDiagnostics = context.admin.role !== AdminRole.SUPPORT;
+    return {
+      id: conversation.id,
+      mode: conversation.mode,
+      updatedAt: conversation.updatedAt,
+      humanModeExpiresAt: conversation.humanModeExpiresAt,
+      replyWindowExpiresAt: conversation.telegramReplyWindowExpiresAt,
+      customer: {
+        name: customerName(conversation.customer),
+        username: conversation.customer.username,
+        telegramUserId: conversation.customer.telegramUserId.toString(),
+      },
+      messages: [...conversation.messages].reverse().map((message) => ({
+        ...message,
+        processingErrorCode: showDiagnostics ? message.processingErrorCode : undefined,
+      })),
+      handoffs: conversation.handoffs,
+      aiDecisions: conversation.aiDecisions.map((decision) => ({
+        id: decision.id,
+        answerable: decision.answerable,
+        confidence: decision.confidence,
+        createdAt: decision.createdAt,
+        latencyMs: decision.latencyMs,
+        ...(showDiagnostics
+          ? {
+              reason: decision.reason,
+              model: decision.model,
+              promptVersion: decision.promptVersion,
+              totalTokens: decision.totalTokens,
+              errorCode: decision.errorCode,
+              supportingChunkIds: decision.supportingChunkIds,
+            }
+          : {}),
+      })),
+    };
+  }
+
+  async listKnowledge(
+    context: MiniAppSessionContext,
+    businessAccountId: string,
+    options: { query?: string | undefined },
+  ) {
+    requireRole(context, AdminRole.ADMIN);
+    requireBusiness(context, businessAccountId);
+    const [published, drafts] = await Promise.all([
+      this.knowledge.list(businessAccountId, 1, 100, options.query),
+      this.knowledge.listDrafts(businessAccountId),
+    ]);
+    return {
+      published: published.items,
+      drafts: drafts.filter(
+        (draft) =>
+          !options.query ||
+          draft.title.includes(options.query) ||
+          draft.description.includes(options.query),
+      ),
+    };
+  }
+
+  async knowledgeDetails(
+    context: MiniAppSessionContext,
+    businessAccountId: string,
+    knowledgeId: string,
+  ) {
+    requireRole(context, AdminRole.ADMIN);
+    requireBusiness(context, businessAccountId);
+    const item = await this.knowledge.get(businessAccountId, knowledgeId);
+    if (!item) throw new ResourceUnavailableError();
+    const [chunks, jobs, draft] = await Promise.all([
+      this.prisma.knowledgeChunk.findMany({
+        where: { knowledgeItemId: item.id, knowledgeItem: { businessAccountId } },
+        orderBy: { chunkIndex: 'asc' },
+        select: {
+          id: true,
+          chunkIndex: true,
+          knowledgeVersion: true,
+          content: true,
+          isActive: true,
+        },
+      }),
+      this.prisma.indexingJob.findMany({
+        where: { knowledgeItemId: item.id, knowledgeItem: { businessAccountId } },
+        orderBy: { createdAt: 'desc' },
+        take: 10,
+        select: {
+          id: true,
+          status: true,
+          attempts: true,
+          maxAttempts: true,
+          lastErrorCode: true,
+          createdAt: true,
+          completedAt: true,
+        },
+      }),
+      this.prisma.knowledgeDraft.findFirst({
+        where: { knowledgeItemId: item.id, businessAccountId },
+      }),
+    ]);
+    return { item, chunks, jobs, draft };
+  }
+
+  async createKnowledgeDraft(
+    context: MiniAppSessionContext,
+    businessAccountId: string,
+    knowledgeItemId?: string,
+  ) {
+    requireRole(context, AdminRole.ADMIN);
+    requireBusiness(context, businessAccountId);
+    return this.knowledge.createDraft(businessAccountId, context.admin.id, knowledgeItemId);
+  }
+
+  async updateKnowledgeDraft(
+    context: MiniAppSessionContext,
+    businessAccountId: string,
+    draftId: string,
+    input: {
+      revision: number;
+      title?: string | undefined;
+      description?: string | undefined;
+    },
+  ) {
+    requireRole(context, AdminRole.ADMIN);
+    requireBusiness(context, businessAccountId);
+    return this.knowledge.updateDraft(
+      businessAccountId,
+      draftId,
+      input.revision,
+      {
+        ...(input.title === undefined ? {} : { title: input.title }),
+        ...(input.description === undefined ? {} : { description: input.description }),
+      },
+      context.admin.id,
+    );
+  }
+
+  async knowledgeDraftDetails(
+    context: MiniAppSessionContext,
+    businessAccountId: string,
+    draftId: string,
+  ) {
+    requireRole(context, AdminRole.ADMIN);
+    requireBusiness(context, businessAccountId);
+    const draft = await this.knowledge.getDraft(businessAccountId, draftId);
+    if (!draft) throw new ResourceUnavailableError();
+    return draft;
+  }
+
+  async previewKnowledgeDraft(
+    context: MiniAppSessionContext,
+    businessAccountId: string,
+    draftId: string,
+  ) {
+    requireRole(context, AdminRole.ADMIN);
+    requireBusiness(context, businessAccountId);
+    const draft = await this.knowledge.getDraft(businessAccountId, draftId);
+    if (!draft) throw new ResourceUnavailableError();
+    if (!draft.description.trim()) return [];
+    return chunkKnowledge(
+      draft.description,
+      this.config.rag.chunkMaxChars,
+      this.config.rag.chunkOverlapChars,
+    );
+  }
+
+  async publishKnowledgeDraft(
+    context: MiniAppSessionContext,
+    businessAccountId: string,
+    draftId: string,
+    revision: number,
+  ) {
+    requireRole(context, AdminRole.ADMIN);
+    requireBusiness(context, businessAccountId);
+    return this.knowledge.publishDraft(businessAccountId, draftId, revision, context.admin.id);
+  }
+
+  async listConnections(context: MiniAppSessionContext, businessAccountId: string) {
+    requireBusiness(context, businessAccountId);
+    const showDiagnostics = context.admin.role !== AdminRole.SUPPORT;
+    const connections = await this.prisma.businessConnection.findMany({
+      where: { businessAccountId },
+      orderBy: { updatedAt: 'desc' },
+    });
+    return connections.map((connection) => ({
+      id: showDiagnostics ? connection.id : undefined,
+      enabled: connection.enabled,
+      canReply: connection.canReply,
+      connectedAt: connection.connectedAt,
+      disabledAt: connection.disabledAt,
+      updatedAt: connection.updatedAt,
+      rights: showDiagnostics ? connection.rights : undefined,
+    }));
+  }
+
+  async systemHealth(context: MiniAppSessionContext, businessAccountId: string) {
+    requireBusiness(context, businessAccountId);
+    const [
+      report,
+      indexing,
+      conversationJobs,
+      notificationDeliveries,
+      credit,
+      aiAvailability,
+      aiSuppressions,
+      settingsChanges,
+    ] = await Promise.all([
+      this.health.readiness(),
+      this.prisma.indexingJob.groupBy({
+        by: ['status'],
+        where: { knowledgeItem: { businessAccountId } },
+        _count: true,
+      }),
+      this.prisma.conversationJob.groupBy({
+        by: ['status'],
+        where: { conversation: { businessAccountId } },
+        _count: true,
+      }),
+      this.prisma.notificationDelivery.groupBy({
+        by: ['status'],
+        where: { notification: { businessAccountId } },
+        _count: true,
+      }),
+      this.prisma.providerCreditMonitorState.findUnique({ where: { id: 'nanogpt' } }),
+      this.availability ? this.availability.check({ businessAccountId }) : Promise.resolve(null),
+      this.prisma.auditLog.groupBy({
+        by: ['action'],
+        where: {
+          businessAccountId,
+          action: {
+            in: [
+              'AI_RESPONSE_SUPPRESSED_MASTER_DISABLED',
+              'AI_RESPONSE_SUPPRESSED_OUTSIDE_WORKING_HOURS',
+            ],
+          },
+        },
+        _count: true,
+      }),
+      this.prisma.auditLog.count({
+        where: {
+          businessAccountId,
+          action: {
+            in: [
+              'AI_MASTER_ENABLED',
+              'AI_MASTER_DISABLED',
+              'AI_WORKING_HOURS_UPDATED',
+              'AI_TIMEZONE_UPDATED',
+            ],
+          },
+        },
+      }),
+    ]);
+    const showDiagnostics = context.admin.role !== AdminRole.SUPPORT;
+    return {
+      ready: report.ready,
+      checks: showDiagnostics ? report.checks : undefined,
+      queues: showDiagnostics
+        ? { indexing, conversations: conversationJobs, notifications: notificationDeliveries }
+        : undefined,
+      credit:
+        showDiagnostics && credit
+          ? {
+              lastCheckedAt: credit.lastCheckedAt,
+              isLow:
+                credit.lastBalanceUsd !== null &&
+                credit.lastBalanceUsd.toNumber() < this.config.nanoGptCredit.lowBalanceUsd,
+            }
+          : undefined,
+      ai: {
+        availability: aiAvailability,
+        suppressions: Object.fromEntries(aiSuppressions.map((item) => [item.action, item._count])),
+        settingsChanges,
+      },
+    };
+  }
+
+  async listAdmins(context: MiniAppSessionContext, businessAccountId: string) {
+    requireOwner(context);
+    requireBusiness(context, businessAccountId);
+    const accesses = await this.prisma.adminBusinessAccount.findMany({
+      where: { businessAccountId },
+      orderBy: { createdAt: 'asc' },
+      include: { admin: { select: adminSelect } },
+    });
+    return accesses.map((access) => ({
+      ...access.admin,
+      telegramUserId: access.admin.telegramUserId.toString(),
+      protected: access.admin.role === AdminRole.OWNER || access.admin.id === context.admin.id,
+    }));
+  }
+
+  async addAdmin(
+    context: MiniAppSessionContext,
+    businessAccountId: string,
+    input: {
+      telegramUserId: string;
+      role: AdminRole;
+      displayName?: string | undefined;
+    },
+  ) {
+    requireOwner(context);
+    requireBusiness(context, businessAccountId);
+    if (!/^\d{1,20}$/.test(input.telegramUserId)) {
+      throw new ValidationError('Telegram ID is invalid', 'INVALID_TELEGRAM_ID');
+    }
+    if (input.role !== AdminRole.ADMIN && input.role !== AdminRole.SUPPORT) {
+      throw new ValidationError('Role is invalid', 'INVALID_ROLE');
+    }
+    return this.prisma.$transaction(async (tx) => {
+      const existing = await tx.admin.findUnique({
+        where: { telegramUserId: BigInt(input.telegramUserId) },
+      });
+      if (existing?.role === AdminRole.OWNER) throw new AuthorizationError();
+      const admin = await tx.admin.upsert({
+        where: { telegramUserId: BigInt(input.telegramUserId) },
+        create: {
+          id: newId(),
+          telegramUserId: BigInt(input.telegramUserId),
+          role: input.role,
+          displayName: input.displayName?.trim() ?? null,
+        },
+        update: {
+          role: input.role,
+          isActive: true,
+          ...(input.displayName === undefined
+            ? {}
+            : { displayName: input.displayName.trim() || null }),
+        },
+      });
+      await tx.adminBusinessAccount.upsert({
+        where: { adminId_businessAccountId: { adminId: admin.id, businessAccountId } },
+        create: { adminId: admin.id, businessAccountId },
+        update: {},
+      });
+      await tx.auditLog.create({
+        data: {
+          id: newId(),
+          businessAccountId,
+          actorType: 'ADMIN',
+          actorId: context.admin.id,
+          action: 'ADMIN_AUTHORIZED',
+          entityType: 'Admin',
+          entityId: admin.id,
+          metadata: { role: input.role },
+        },
+      });
+      return { ...admin, telegramUserId: admin.telegramUserId.toString() };
+    });
+  }
+
+  async updateAdmin(
+    context: MiniAppSessionContext,
+    businessAccountId: string,
+    targetId: string,
+    input: { role?: AdminRole | undefined; isActive?: boolean | undefined },
+  ) {
+    requireOwner(context);
+    requireBusiness(context, businessAccountId);
+    if (targetId === context.admin.id) throw new AuthorizationError();
+    const target = await this.prisma.admin.findFirst({
+      where: { id: targetId, businessAccess: { some: { businessAccountId } } },
+    });
+    if (!target || target.role === AdminRole.OWNER) throw new ResourceUnavailableError();
+    if (input.role && input.role !== AdminRole.ADMIN && input.role !== AdminRole.SUPPORT) {
+      throw new ValidationError('Role is invalid', 'INVALID_ROLE');
+    }
+    return this.prisma.$transaction(async (tx) => {
+      const admin = await tx.admin.update({
+        where: { id: target.id },
+        data: {
+          ...(input.role ? { role: input.role } : {}),
+          ...(input.isActive === undefined ? {} : { isActive: input.isActive }),
+        },
+      });
+      await tx.auditLog.create({
+        data: {
+          id: newId(),
+          businessAccountId,
+          actorType: 'ADMIN',
+          actorId: context.admin.id,
+          action:
+            input.role && input.role !== target.role
+              ? 'ADMIN_ROLE_CHANGED'
+              : input.isActive
+                ? 'ADMIN_ACTIVATED'
+                : 'ADMIN_DEACTIVATED',
+          entityType: 'Admin',
+          entityId: target.id,
+          metadata: { previousRole: target.role, role: admin.role, isActive: admin.isActive },
+        },
+      });
+      if (!admin.isActive) {
+        await tx.adminSession.updateMany({
+          where: { adminId: admin.id, revokedAt: null },
+          data: { revokedAt: new Date() },
+        });
+      }
+      return { ...admin, telegramUserId: admin.telegramUserId.toString() };
+    });
+  }
+
+  async removeAdminAccess(
+    context: MiniAppSessionContext,
+    businessAccountId: string,
+    targetId: string,
+  ): Promise<void> {
+    requireOwner(context);
+    requireBusiness(context, businessAccountId);
+    if (targetId === context.admin.id) throw new AuthorizationError();
+    const target = await this.prisma.admin.findFirst({
+      where: {
+        id: targetId,
+        role: { not: AdminRole.OWNER },
+        businessAccess: { some: { businessAccountId } },
+      },
+    });
+    if (!target) throw new ResourceUnavailableError();
+    await this.prisma.$transaction(async (tx) => {
+      await tx.adminBusinessAccount.delete({
+        where: { adminId_businessAccountId: { adminId: target.id, businessAccountId } },
+      });
+      const remaining = await tx.adminBusinessAccount.count({ where: { adminId: target.id } });
+      if (remaining === 0) {
+        await tx.admin.update({ where: { id: target.id }, data: { isActive: false } });
+        await tx.adminSession.updateMany({
+          where: { adminId: target.id, revokedAt: null },
+          data: { revokedAt: new Date() },
+        });
+      }
+      await tx.auditLog.create({
+        data: {
+          id: newId(),
+          businessAccountId,
+          actorType: 'ADMIN',
+          actorId: context.admin.id,
+          action: 'ADMIN_ACCESS_REMOVED',
+          entityType: 'Admin',
+          entityId: target.id,
+          metadata: { remainingBusinessAssignments: remaining },
+        },
+      });
+    });
+  }
+
+  async audit(
+    context: MiniAppSessionContext,
+    businessAccountId: string,
+    options: { action?: string | undefined },
+  ) {
+    requireRole(context, AdminRole.ADMIN);
+    requireBusiness(context, businessAccountId);
+    return this.prisma.auditLog.findMany({
+      where: { businessAccountId, ...(options.action ? { action: options.action } : {}) },
+      orderBy: { createdAt: 'desc' },
+      take: 200,
+    });
+  }
+
+  settings(context: MiniAppSessionContext, businessAccountId: string) {
+    requireBusiness(context, businessAccountId);
+    return {
+      timezone: 'Asia/Tehran',
+      locale: 'fa',
+      humanModeHours: this.config.handoff.hours,
+      notifyAdditionalMessages: this.config.handoff.notifyAdditionalMessages,
+      customerAcknowledgementEnabled: this.config.handoff.customerMessageEnabled,
+      managedByDeployment: true,
+    };
+  }
+
+  async aiSettings(context: MiniAppSessionContext, businessAccountId: string) {
+    const business = requireBusiness(context, businessAccountId);
+    const settings = await this.prisma.businessAiSettings.findUnique({
+      where: { businessAccountId },
+      include: { updatedByAdmin: { select: { id: true, displayName: true } } },
+    });
+    const availability = this.availability
+      ? await this.availability.check({ businessAccountId })
+      : null;
+    return {
+      business: { id: business.id, name: business.name },
+      enabled: settings?.enabled ?? true,
+      timezone: settings?.timezone ?? this.config.business.defaultTimezone,
+      weeklySchedule:
+        (settings?.weeklySchedule as unknown as WeeklySchedule | undefined) ??
+        defaultWeeklySchedule(),
+      outsideHoursPolicy: 'SILENT' as const,
+      version: settings?.version ?? 0,
+      updatedAt: settings?.updatedAt ?? null,
+      updatedBy: settings?.updatedByAdmin ?? null,
+      lastChangeReason: settings?.lastChangeReason ?? null,
+      canEdit: context.admin.role !== AdminRole.SUPPORT,
+      availability,
+    };
+  }
+
+  async aiAvailability(context: MiniAppSessionContext, businessAccountId: string) {
+    requireBusiness(context, businessAccountId);
+    if (!this.availability) throw new AppError('Availability service missing', 'INTERNAL_ERROR');
+    return this.availability.check({ businessAccountId });
+  }
+
+  async updateAiSettings(
+    context: MiniAppSessionContext,
+    businessAccountId: string,
+    input: {
+      enabled: boolean;
+      timezone: string;
+      weeklySchedule: WeeklySchedule;
+      version: number;
+      reason?: string | undefined;
+    },
+    correlationId?: string,
+  ) {
+    requireRole(context, AdminRole.ADMIN);
+    requireBusiness(context, businessAccountId);
+    if (!validIanaTimezone(input.timezone)) {
+      throw new ValidationError('Timezone is invalid', 'INVALID_TIMEZONE');
+    }
+    const schedule = validateWeeklySchedule(input.weeklySchedule);
+    const trimmedReason = input.reason?.trim();
+    const reason = trimmedReason === '' ? null : (trimmedReason ?? null);
+    if (reason && reason.length > 500) {
+      throw new ValidationError('Reason is too long', 'INVALID_CHANGE_REASON');
+    }
+    await this.prisma.$transaction(async (tx) => {
+      const previous = await tx.businessAiSettings.findUnique({ where: { businessAccountId } });
+      let saved;
+      if (!previous) {
+        if (input.version !== 0) throw new AppError('Settings changed', 'STATE_CONFLICT', 409);
+        saved = await tx.businessAiSettings.create({
+          data: {
+            id: newId(),
+            businessAccountId,
+            enabled: input.enabled,
+            timezone: input.timezone,
+            weeklySchedule: schedule as unknown as Prisma.InputJsonValue,
+            outsideHoursPolicy: 'SILENT',
+            version: 1,
+            lastChangeReason: reason,
+            updatedByAdminId: context.admin.id,
+          },
+        });
+      } else {
+        const changed = await tx.businessAiSettings.updateMany({
+          where: { businessAccountId, version: input.version },
+          data: {
+            enabled: input.enabled,
+            timezone: input.timezone,
+            weeklySchedule: schedule as unknown as Prisma.InputJsonValue,
+            version: { increment: 1 },
+            lastChangeReason: reason,
+            updatedByAdminId: context.admin.id,
+          },
+        });
+        if (changed.count !== 1) throw new AppError('Settings changed', 'STATE_CONFLICT', 409);
+        saved = await tx.businessAiSettings.findUniqueOrThrow({ where: { businessAccountId } });
+      }
+      const previousEnabled = previous?.enabled ?? true;
+      const previousTimezone = previous?.timezone ?? this.config.business.defaultTimezone;
+      const previousSchedule =
+        (previous?.weeklySchedule as unknown as WeeklySchedule | undefined) ??
+        defaultWeeklySchedule();
+      const events: string[] = [];
+      if (previousEnabled !== saved.enabled) {
+        events.push(saved.enabled ? 'AI_MASTER_ENABLED' : 'AI_MASTER_DISABLED');
+      }
+      if (previousTimezone !== saved.timezone) events.push('AI_TIMEZONE_UPDATED');
+      if (JSON.stringify(previousSchedule) !== JSON.stringify(schedule)) {
+        events.push('AI_WORKING_HOURS_UPDATED');
+      }
+      if (events.length === 0) events.push('AI_SETTINGS_UPDATED');
+      for (const action of events) {
+        await tx.auditLog.create({
+          data: {
+            id: newId(),
+            businessAccountId,
+            actorType: 'ADMIN',
+            actorId: context.admin.id,
+            action,
+            entityType: 'BusinessAiSettings',
+            entityId: saved.id,
+            correlationId: correlationId ?? null,
+            metadata: {
+              previous: {
+                enabled: previousEnabled,
+                timezone: previousTimezone,
+                weeklySchedule: previousSchedule,
+              },
+              next: { enabled: saved.enabled, timezone: saved.timezone, weeklySchedule: schedule },
+              reason,
+            } as unknown as Prisma.InputJsonValue,
+          },
+        });
+      }
+      if (previousEnabled !== saved.enabled && this.notifier) {
+        await this.notifier.enqueue(tx, {
+          dedupeKey: `${saved.enabled ? 'AI_MASTER_ENABLED' : 'AI_MASTER_DISABLED'}:${saved.id}:${saved.version}`,
+          type: saved.enabled ? 'AI_MASTER_ENABLED' : 'AI_MASTER_DISABLED',
+          severity: saved.enabled ? NotificationSeverity.SUCCESS : NotificationSeverity.WARNING,
+          businessAccountId,
+          relatedEntityType: 'BusinessAiSettings',
+          relatedEntityId: saved.id,
+          titleFa: saved.enabled ? '✅ پاسخ‌گویی هوشمند فعال شد' : '⏸ پاسخ‌گویی هوشمند متوقف شد',
+          summaryFa: saved.enabled
+            ? 'پاسخ خودکار برای پیام‌های جدید فعال است.'
+            : 'پاسخ خودکار برای این کسب‌وکار غیرفعال شد.',
+          destinationPath: `/settings?business=${encodeURIComponent(businessAccountId)}`,
+        });
+      }
+      return saved;
+    });
+    return this.aiSettings(context, businessAccountId);
+  }
+
+  async notifications(context: MiniAppSessionContext) {
+    const businessAccountIds = context.businessAccess
+      .filter((access) => access.businessAccount.isActive)
+      .map((access) => access.businessAccountId);
+    const deliveries = await this.prisma.notificationDelivery.findMany({
+      where: {
+        adminId: context.admin.id,
+        notification: {
+          OR: [{ businessAccountId: null }, { businessAccountId: { in: businessAccountIds } }],
+        },
+      },
+      orderBy: { createdAt: 'desc' },
+      take: 100,
+      include: { notification: true },
+    });
+    return deliveries.map((delivery) => ({
+      id: delivery.id,
+      status: delivery.status,
+      readAt: delivery.readAt,
+      createdAt: delivery.createdAt,
+      notification: {
+        type: delivery.notification.type,
+        severity: delivery.notification.severity,
+        title: delivery.notification.titleFa,
+        summary: delivery.notification.summaryFa,
+        destinationPath: delivery.notification.destinationPath,
+      },
+    }));
+  }
+
+  async markNotificationRead(context: MiniAppSessionContext, deliveryId: string): Promise<void> {
+    const businessAccountIds = context.businessAccess
+      .filter((access) => access.businessAccount.isActive)
+      .map((access) => access.businessAccountId);
+    const changed = await this.prisma.notificationDelivery.updateMany({
+      where: {
+        id: deliveryId,
+        adminId: context.admin.id,
+        notification: {
+          OR: [{ businessAccountId: null }, { businessAccountId: { in: businessAccountIds } }],
+        },
+      },
+      data: { readAt: new Date() },
+    });
+    if (changed.count !== 1) throw new ResourceUnavailableError();
+  }
+
+  async setKnowledgeActive(
+    context: MiniAppSessionContext,
+    businessAccountId: string,
+    knowledgeId: string,
+    isActive: boolean,
+  ) {
+    requireRole(context, AdminRole.ADMIN);
+    requireBusiness(context, businessAccountId);
+    return this.knowledge.setActive(businessAccountId, knowledgeId, isActive, context.admin.id);
+  }
+
+  async deleteKnowledge(
+    context: MiniAppSessionContext,
+    businessAccountId: string,
+    knowledgeId: string,
+    confirmTitle: string,
+  ): Promise<void> {
+    requireRole(context, AdminRole.ADMIN);
+    requireBusiness(context, businessAccountId);
+    const item = await this.knowledge.get(businessAccountId, knowledgeId);
+    if (!item) throw new ResourceUnavailableError();
+    if (item.title !== confirmTitle) {
+      throw new ValidationError('Confirmation title does not match', 'CONFIRMATION_MISMATCH');
+    }
+    await this.knowledge.delete(businessAccountId, knowledgeId, context.admin.id);
+  }
+
+  async retryKnowledge(
+    context: MiniAppSessionContext,
+    businessAccountId: string,
+    knowledgeId: string,
+  ): Promise<void> {
+    requireRole(context, AdminRole.ADMIN);
+    requireBusiness(context, businessAccountId);
+    await this.knowledge.retryIndexing(businessAccountId, knowledgeId, context.admin.id);
+  }
+
+  async claimHandoff(
+    context: MiniAppSessionContext,
+    businessAccountId: string,
+    conversationId: string,
+  ) {
+    requireBusiness(context, businessAccountId);
+    await this.handoffs.claim(businessAccountId, conversationId, context.admin);
+  }
+
+  async acknowledgeHandoff(
+    context: MiniAppSessionContext,
+    businessAccountId: string,
+    conversationId: string,
+  ) {
+    requireBusiness(context, businessAccountId);
+    await this.handoffs.acknowledge(businessAccountId, conversationId, context.admin);
+  }
+
+  async extendHandoff(
+    context: MiniAppSessionContext,
+    businessAccountId: string,
+    conversationId: string,
+  ) {
+    requireBusiness(context, businessAccountId);
+    return this.handoffs.extend(businessAccountId, conversationId, context.admin);
+  }
+
+  async enableAi(
+    context: MiniAppSessionContext,
+    businessAccountId: string,
+    conversationId: string,
+  ) {
+    requireBusiness(context, businessAccountId);
+    const changed = await this.handoffs.enableAiNow(
+      businessAccountId,
+      conversationId,
+      context.admin,
+    );
+    if (!changed) throw new AppError('Conversation mode has changed', 'STATE_CONFLICT', 409);
+  }
+
+  async resolveHandoff(
+    context: MiniAppSessionContext,
+    businessAccountId: string,
+    conversationId: string,
+    input: { outcome: string; note?: string | undefined },
+  ) {
+    requireBusiness(context, businessAccountId);
+    const allowed = [
+      'ANSWERED_BY_SUPPORT',
+      'CUSTOMER_NEED_RESOLVED',
+      'CUSTOMER_NO_RESPONSE',
+      'INCORRECT_HANDOFF',
+      'SERVICE_ISSUE',
+      'OTHER',
+    ];
+    if (!allowed.includes(input.outcome)) {
+      throw new ValidationError('Resolution outcome is invalid', 'INVALID_RESOLUTION_OUTCOME');
+    }
+    if (input.note && input.note.length > 2_000) {
+      throw new ValidationError('Resolution note is too long', 'INVALID_RESOLUTION_NOTE');
+    }
+    await this.handoffs.resolve(
+      businessAccountId,
+      conversationId,
+      context.admin,
+      input.outcome,
+      input.note,
+    );
+  }
+}

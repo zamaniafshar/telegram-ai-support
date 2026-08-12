@@ -30,13 +30,6 @@ export interface TelegramApi {
     text: string,
     options?: SendMessageOptions,
   ): Promise<SentTelegramMessage>;
-  editMessageText(
-    chatId: bigint,
-    messageId: number,
-    text: string,
-    replyMarkup?: InlineKeyboardMarkup,
-  ): Promise<void>;
-  answerCallbackQuery(callbackQueryId: string, text?: string, showAlert?: boolean): Promise<void>;
   getBusinessConnection(id: string): Promise<BusinessConnectionUpdate>;
   readBusinessMessage(
     businessConnectionId: string,
@@ -132,32 +125,6 @@ export class TelegramBotApiClient implements TelegramApi {
       ...(options.disableWebPagePreview ? { link_preview_options: { is_disabled: true } } : {}),
     });
     return telegramMessageSchema.parse(result) as SentTelegramMessage;
-  }
-
-  async editMessageText(
-    chatId: bigint,
-    messageId: number,
-    text: string,
-    replyMarkup?: InlineKeyboardMarkup,
-  ): Promise<void> {
-    await this.#call('editMessageText', {
-      chat_id: chatId,
-      message_id: messageId,
-      text,
-      ...(replyMarkup ? { reply_markup: replyMarkup } : {}),
-    });
-  }
-
-  async answerCallbackQuery(
-    callbackQueryId: string,
-    text?: string,
-    showAlert = false,
-  ): Promise<void> {
-    await this.#call('answerCallbackQuery', {
-      callback_query_id: callbackQueryId,
-      ...(text ? { text } : {}),
-      show_alert: showAlert,
-    });
   }
 
   async getBusinessConnection(id: string): Promise<BusinessConnectionUpdate> {
