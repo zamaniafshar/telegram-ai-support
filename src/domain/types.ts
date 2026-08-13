@@ -21,6 +21,12 @@ export interface ConversationContextMessage {
   sentAt: Date;
 }
 
+export interface CurrentMessageBatchItem {
+  id: string;
+  text: string;
+  sentAt: Date;
+}
+
 export interface AiDecisionResult extends AnswerDecision {
   model: string;
   inputTokens?: number;

@@ -6,6 +6,7 @@ const labels: Record<string, string> = {
   HUMAN: 'پشتیبانی انسانی',
   PENDING_HUMAN: 'در حال ارجاع',
   WAITING: 'در انتظار رسیدگی',
+  NONE: 'بدون ارجاع',
   ACKNOWLEDGED: 'پذیرفته‌شده',
   RESOLVED: 'حل‌شده',
   EXPIRED: 'پایان‌یافته',

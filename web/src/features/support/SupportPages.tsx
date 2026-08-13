@@ -4,13 +4,150 @@ import { Link, useParams, useSearchParams } from 'react-router-dom';
 import { z } from 'zod';
 import { request, jsonBody } from '../../core/api';
 import { faLabel, formatDate, outcomeLabels } from '../../core/format';
-import type {
-  ConversationDetail,
-  ConversationSummary,
-  HandoffDetail,
-  HandoffSummary,
-  Message,
-} from '../../core/types';
+import type { HandoffDetail, HandoffSummary, Message } from '../../core/types';
+
+interface ChatSummary extends Omit<HandoffSummary, 'expiresAt'> {
+  updatedAt: string;
+  expiresAt: string | null;
+  lastMessage: Pick<Message, 'id' | 'text' | 'senderType' | 'sentAt'> | null;
+}
+
+interface AiBacklog {
+  waitingConversations: number;
+  oldestWaitingAt: string | null;
+  nextAiActivationAt: string | null;
+  aiAvailable: boolean;
+  conversations: {
+    conversationId: string;
+    customer: { name: string; username: string | null };
+    queuedMessageCount: number;
+    waitingReason: string | null;
+    oldestWaitingAt: string;
+    mode: string;
+    replyWindowOpen: boolean;
+    replyWindowExpiresAt: string | null;
+  }[];
+}
+
+export function AiBacklogPage() {
+  const { businessPath, hasCapability } = useSession();
+  const client = useQueryClient();
+  const toast = useToast();
+  const queryKey = ['ai-backlog', businessPath('')];
+  const query = useQuery({
+    queryKey,
+    queryFn: () => request<AiBacklog>(businessPath('/ai-backlog')),
+    refetchInterval: 15_000,
+  });
+  const action = useMutation({
+    mutationFn: ({ conversationId, name }: { conversationId: string; name: string }) =>
+      request(businessPath(`/ai-backlog/${encodeURIComponent(conversationId)}/${name}`), {
+        method: 'POST',
+      }),
+    onSuccess: async () => {
+      toast('درخواست ثبت شد.');
+      await client.invalidateQueries({ queryKey });
+    },
+  });
+  const canManage = hasCapability('settings:write');
+  return (
+    <>
+      <PageHeader
+        title="پیام‌های در انتظار پاسخ"
+        subtitle={
+          query.data
+            ? `${query.data.waitingConversations.toLocaleString('fa-IR')} گفتگو`
+            : 'صف پاسخ‌گویی هوشمند'
+        }
+      />
+      <QueryState pending={query.isPending} error={query.error}>
+        {query.data && (
+          <>
+            <Card>
+              <div className="key-values">
+                <KeyValue label="قدیمی‌ترین انتظار">
+                  {formatDate(query.data.oldestWaitingAt, true)}
+                </KeyValue>
+                <KeyValue label="فعال‌سازی بعدی">
+                  {formatDate(query.data.nextAiActivationAt, true)}
+                </KeyValue>
+              </div>
+              {canManage && !query.data.aiAvailable && (
+                <div className="button-row">
+                  <Link className="button" to="/settings">
+                    فعال‌سازی پاسخ‌گویی هوشمند
+                  </Link>
+                </div>
+              )}
+            </Card>
+            <div className="list spaced">
+              {query.data.conversations.length ? (
+                query.data.conversations.map((item) => (
+                  <Card key={item.conversationId}>
+                    <div className="list-main">
+                      <strong>{item.customer.name}</strong>
+                      <span>
+                        {item.queuedMessageCount.toLocaleString('fa-IR')} پیام ·{' '}
+                        {faLabel(item.waitingReason)}
+                      </span>
+                      <span>
+                        حالت گفتگو: {faLabel(item.mode)} · پنجره تلگرام:{' '}
+                        {item.replyWindowOpen ? 'باز' : 'بسته'}
+                      </span>
+                      <time>{formatDate(item.oldestWaitingAt, true)}</time>
+                    </div>
+                    <div className="button-row">
+                      <Link className="button" to={`/conversations/${item.conversationId}`}>
+                        مشاهده گفتگو
+                      </Link>
+                      {canManage && (
+                        <Button
+                          onClick={() =>
+                            action.mutate({ conversationId: item.conversationId, name: 'handoff' })
+                          }
+                        >
+                          ارجاع به پشتیبان
+                        </Button>
+                      )}
+                      {canManage && (
+                        <Button
+                          variant="danger"
+                          onClick={() =>
+                            action.mutate({ conversationId: item.conversationId, name: 'cancel' })
+                          }
+                        >
+                          لغو پاسخ خودکار
+                        </Button>
+                      )}
+                      {canManage && query.data.aiAvailable && (
+                        <Button
+                          variant="primary"
+                          onClick={() =>
+                            action.mutate({
+                              conversationId: item.conversationId,
+                              name: 'process-now',
+                            })
+                          }
+                        >
+                          پردازش اکنون
+                        </Button>
+                      )}
+                    </div>
+                  </Card>
+                ))
+              ) : (
+                <EmptyState
+                  title="پیامی در انتظار نیست"
+                  description="صف پاسخ‌گویی هوشمند خالی است."
+                />
+              )}
+            </div>
+          </>
+        )}
+      </QueryState>
+    </>
+  );
+}
 import { telegram } from '../../core/telegram';
 import {
   Badge,
@@ -35,9 +172,12 @@ function MessageTimeline({ messages }: { messages: Message[] }) {
         description="متن قابل نمایشی برای این گفتگو ثبت نشده است."
       />
     );
+  const newestFirst = [...messages].sort(
+    (left, right) => new Date(right.sentAt).getTime() - new Date(left.sentAt).getTime(),
+  );
   return (
     <div className="timeline">
-      {messages.map((message) => (
+      {newestFirst.map((message) => (
         <article
           className={`message ${message.senderType === 'CUSTOMER' ? '' : 'outgoing'}`}
           key={message.id}
@@ -90,23 +230,23 @@ export function HandoffsPage() {
   const query = useQuery({
     queryKey: ['handoffs', businessPath(''), status, search],
     queryFn: () =>
-      request<HandoffSummary[]>(
+      request<ChatSummary[]>(
         `${businessPath('/handoffs')}?${new URLSearchParams({ ...(status && { status }), ...(search && { query: search }) })}`,
       ),
   });
   return (
     <>
       <PageHeader
-        title="ارجاع‌ها"
+        title="گفتگوها"
         subtitle={
           query.data
             ? `${query.data.length.toLocaleString('fa-IR')} مورد`
-            : 'پیام‌های نیازمند رسیدگی انسانی'
+            : 'همه گفتگوها و وضعیت رسیدگی'
         }
       />
       <SearchForm
         initialValue={search}
-        placeholder="جستجوی نام یا نام کاربری مشتری"
+        placeholder="جستجوی نام، نام کاربری یا متن پیام"
         onSearch={(value) => {
           if (value) params.set('query', value);
           else params.delete('query');
@@ -130,16 +270,17 @@ export function HandoffsPage() {
               <Link className="list-card" to={`/handoffs/${item.conversationId}`} key={item.id}>
                 <div className="list-main">
                   <strong>{item.customer.name}</strong>
-                  <span>{faLabel(item.reasonCode)}</span>
+                  <span dir="auto">{item.lastMessage?.text ?? 'بدون پیام متنی'}</span>
+                  {item.status !== 'NONE' && <small>{faLabel(item.reasonCode)}</small>}
                 </div>
                 <div className="list-meta">
-                  <Badge status={item.status} />
-                  <time>{formatDate(item.startedAt, true)}</time>
+                  <Badge status={item.status === 'NONE' ? item.mode : item.status} />
+                  <time>{formatDate(item.updatedAt, true)}</time>
                 </div>
               </Link>
             ))
           ) : (
-            <EmptyState title="ارجاعی یافت نشد" description="پیامی منتظر رسیدگی انسانی نیست." />
+            <EmptyState title="گفتگویی یافت نشد" description="گفتگویی با این وضعیت وجود ندارد." />
           )}
         </div>
       </QueryState>
@@ -190,7 +331,7 @@ export function HandoffDetailPage() {
     <QueryState pending={query.isPending} error={query.error}>
       {detail && (
         <>
-          <PageHeader title="جزئیات ارجاع" subtitle="زمینه اخیر و اقدامات انسانی" />
+          <PageHeader title="جزئیات گفتگو" subtitle="پیام‌ها، وضعیت و اقدامات پشتیبانی" />
           <section className="detail-hero">
             <Badge status={detail.activeHandoff?.status ?? detail.mode} />
             <h2>{detail.customer.name}</h2>
@@ -232,7 +373,7 @@ export function HandoffDetailPage() {
               <MessageTimeline messages={detail.messages} />
             </section>
             <aside>
-              <Card title="وضعیت ارجاع">
+              <Card title="وضعیت گفتگو">
                 <div className="key-values">
                   <KeyValue label="حالت گفتگو">{faLabel(detail.mode)}</KeyValue>
                   <KeyValue label="دلیل ارجاع">
@@ -296,146 +437,6 @@ export function HandoffDetailPage() {
               </form>
             </Dialog>
           )}
-        </>
-      )}
-    </QueryState>
-  );
-}
-
-export function ConversationsPage() {
-  const { businessPath } = useSession();
-  const [params, setParams] = useSearchParams();
-  const mode = params.get('mode') ?? '';
-  const search = params.get('query') ?? '';
-  const query = useQuery({
-    queryKey: ['conversations', businessPath(''), mode, search],
-    queryFn: () =>
-      request<ConversationSummary[]>(
-        `${businessPath('/conversations')}?${new URLSearchParams({ ...(mode && { mode }), ...(search && { query: search }) })}`,
-      ),
-  });
-  return (
-    <>
-      <PageHeader
-        title="گفتگوها"
-        subtitle={
-          query.data
-            ? `${query.data.length.toLocaleString('fa-IR')} گفتگو`
-            : 'تاریخچه تعامل مشتریان'
-        }
-      />
-      <SearchForm
-        initialValue={search}
-        placeholder="جستجوی نام، نام کاربری یا متن پیام"
-        onSearch={(value) => {
-          if (value) params.set('query', value);
-          else params.delete('query');
-          setParams(params);
-        }}
-      />
-      <Filters
-        name="mode"
-        value={mode}
-        options={[
-          ['', 'همه'],
-          ['AI', 'هوشمند'],
-          ['HUMAN', 'انسانی'],
-        ]}
-      />
-      <QueryState pending={query.isPending} error={query.error}>
-        <div className="list spaced">
-          {query.data?.length ? (
-            query.data.map((item) => (
-              <Link className="list-card" to={`/conversations/${item.id}`} key={item.id}>
-                <div className="list-main">
-                  <strong>{item.customer.name}</strong>
-                  <span dir="auto">{item.lastMessage?.text ?? 'بدون پیام متنی'}</span>
-                </div>
-                <div className="list-meta">
-                  <Badge status={item.mode} />
-                  <time>{formatDate(item.updatedAt, true)}</time>
-                </div>
-              </Link>
-            ))
-          ) : (
-            <EmptyState
-              icon="◌"
-              title="گفتگویی ثبت نشده است"
-              description="پس از دریافت پیام مشتری، گفتگوها در این بخش نمایش داده می‌شوند."
-            />
-          )}
-        </div>
-      </QueryState>
-    </>
-  );
-}
-
-export function ConversationDetailPage() {
-  const { id = '' } = useParams();
-  const { businessPath } = useSession();
-  const query = useQuery({
-    queryKey: ['conversation', businessPath(''), id],
-    queryFn: () =>
-      request<ConversationDetail>(businessPath(`/conversations/${encodeURIComponent(id)}`)),
-  });
-  const detail = query.data;
-  return (
-    <QueryState pending={query.isPending} error={query.error}>
-      {detail && (
-        <>
-          <PageHeader title="جزئیات گفتگو" subtitle="پیام‌ها و بینش‌های عملیاتی" />
-          <section className="detail-hero">
-            <Badge status={detail.mode} />
-            <h2>{detail.customer.name}</h2>
-            <p>
-              {detail.customer.username ? `@${detail.customer.username}` : 'بدون نام کاربری عمومی'}
-            </p>
-          </section>
-          <div className="split-grid">
-            <MessageTimeline messages={detail.messages} />
-            <aside className="grid">
-              <Card title="اطلاعات گفتگو">
-                <div className="key-values">
-                  <KeyValue label="آخرین تغییر">{formatDate(detail.updatedAt)}</KeyValue>
-                  <KeyValue label="پایان حالت انسانی">
-                    {formatDate(detail.humanModeExpiresAt)}
-                  </KeyValue>
-                  <KeyValue label="شناسه تلگرام">
-                    <bdi className="ltr">{detail.customer.telegramUserId}</bdi>
-                  </KeyValue>
-                </div>
-              </Card>
-              <Card title="بینش تصمیم‌های هوشمند">
-                {detail.aiDecisions.length ? (
-                  detail.aiDecisions.map((decision) => (
-                    <details key={decision.id}>
-                      <summary>
-                        {decision.answerable ? 'پاسخ خودکار ارائه شد' : 'به پشتیبان ارجاع شد'} —{' '}
-                        {formatDate(decision.createdAt)}
-                      </summary>
-                      <div className="key-values">
-                        <KeyValue label="اطمینان">
-                          {Math.round(decision.confidence * 100).toLocaleString('fa-IR')}٪
-                        </KeyValue>
-                        <KeyValue label="زمان پردازش">
-                          {decision.latencyMs.toLocaleString('fa-IR')} میلی‌ثانیه
-                        </KeyValue>
-                        <KeyValue label="توضیح عملیاتی">
-                          {decision.errorCode
-                            ? 'پردازش به‌دلیل یک اختلال عملیاتی کامل نشد.'
-                            : decision.answerable
-                              ? 'پاسخ با تکیه بر دانش معتبر سامانه ارائه شد.'
-                              : 'شواهد کافی برای ارائه پاسخ مطمئن وجود نداشت.'}
-                        </KeyValue>
-                      </div>
-                    </details>
-                  ))
-                ) : (
-                  <p className="muted">تصمیم هوشمندی برای نمایش ثبت نشده است.</p>
-                )}
-              </Card>
-            </aside>
-          </div>
         </>
       )}
     </QueryState>

@@ -7,8 +7,8 @@ import { useTheme } from './ThemeProvider';
 
 const primary = [
   ['/overview', '⌂', 'نمای کلی'],
-  ['/handoffs', '◉', 'ارجاع‌ها'],
-  ['/conversations', '◌', 'گفتگوها'],
+  ['/handoffs', '◉', 'گفتگوها'],
+  ['/ai-backlog', '◷', 'پیام‌های در انتظار'],
 ] as const;
 
 export function AppShell() {

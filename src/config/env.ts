@@ -81,6 +81,14 @@ const envSchema = z.object({
   CHUNK_MAX_CHARS: z.coerce.number().int().min(300).max(10_000).default(1_800),
   CHUNK_OVERLAP_CHARS: z.coerce.number().int().min(0).max(2_000).default(250),
   MESSAGE_DEBOUNCE_MS: nonNegativeInt(1_200),
+  AI_CUSTOMER_MAX_REQUESTS_PER_HOUR: positiveInt(10),
+  AI_CUSTOMER_MAX_REQUESTS_PER_DAY: positiveInt(30),
+  AI_CUSTOMER_COOLDOWN_MINUTES: positiveInt(360),
+  AI_BUSINESS_MAX_REQUESTS_PER_HOUR: positiveInt(100),
+  AI_BUSINESS_MAX_REQUESTS_PER_DAY: positiveInt(500),
+  AI_BUSINESS_COOLDOWN_MINUTES: positiveInt(60),
+  AI_MAX_BATCH_MESSAGES: positiveInt(20),
+  AI_MAX_BATCH_CHARS: positiveInt(12_000),
   HANDOFF_HOURS: z.coerce.number().int().min(1).max(168).default(24),
   TELEGRAM_REPLY_WINDOW_HOURS: z.coerce.number().int().min(1).max(48).default(24),
   HANDOFF_CUSTOMER_MESSAGE: z
@@ -213,6 +221,16 @@ export function loadConfig(source: NodeJS.ProcessEnv = process.env) {
     },
     routing: {
       safeGreetingEnabled: env.SAFE_GREETING_ENABLED,
+    },
+    abuseProtection: {
+      maxRequestsPerHour: env.AI_CUSTOMER_MAX_REQUESTS_PER_HOUR,
+      maxRequestsPerDay: env.AI_CUSTOMER_MAX_REQUESTS_PER_DAY,
+      cooldownMinutes: env.AI_CUSTOMER_COOLDOWN_MINUTES,
+      businessMaxRequestsPerHour: env.AI_BUSINESS_MAX_REQUESTS_PER_HOUR,
+      businessMaxRequestsPerDay: env.AI_BUSINESS_MAX_REQUESTS_PER_DAY,
+      businessCooldownMinutes: env.AI_BUSINESS_COOLDOWN_MINUTES,
+      maxBatchMessages: env.AI_MAX_BATCH_MESSAGES,
+      maxBatchChars: env.AI_MAX_BATCH_CHARS,
     },
     business: { defaultTimezone: env.BUSINESS_DEFAULT_TIMEZONE },
     handoff: {

@@ -3,6 +3,7 @@ import type { AppConfig } from '../config/env.js';
 import type {
   AiDecisionResult,
   ConversationContextMessage,
+  CurrentMessageBatchItem,
   RetrievalResult,
 } from '../domain/types.js';
 import { AppError } from '../utils/errors.js';
@@ -18,6 +19,7 @@ export interface EmbeddingProvider {
 export interface GroundedAnswerer {
   decide(input: {
     customerText: string;
+    currentMessageBatch?: CurrentMessageBatchItem[];
     retrieved: RetrievalResult[];
     context: ConversationContextMessage[];
   }): Promise<AiDecisionResult>;
@@ -79,6 +81,7 @@ export class OpenAiAdapter implements EmbeddingProvider, GroundedAnswerer {
 
   async decide(input: {
     customerText: string;
+    currentMessageBatch?: CurrentMessageBatchItem[];
     retrieved: RetrievalResult[];
     context: ConversationContextMessage[];
   }): Promise<AiDecisionResult> {
@@ -97,7 +100,8 @@ export class OpenAiAdapter implements EmbeddingProvider, GroundedAnswerer {
       '- SOCIAL_REPLY: use only when the current message is purely social, such as a greeting, thanks, farewell, or polite introduction, and asks for no business fact or action. This decision requires no KNOWLEDGE. If the customer only says they have a question, naturally invite them to ask it.',
       '- GROUNDED_ANSWER: use only when every business-specific claim needed for a complete, useful answer is directly supported by KNOWLEDGE. Include every chunk ID actually used.',
       '- HANDOFF: use when required facts are missing, stale, ambiguous, or contradictory; when a human action or judgment is required; when the customer requests a human; or when you are uncertain whether a safe answer is fully supported.',
-      '- The current CUSTOMER_TEXT is the request to answer. Do not answer an earlier request unless the current message clearly continues or refers to it.',
+      '- CURRENT_MESSAGE_BATCH is the complete current request, ordered chronologically. Resolve references across its messages and answer it once as a coherent whole.',
+      '- Do not reply separately to greetings or fragments in CURRENT_MESSAGE_BATCH. Produce at most one concise response for the complete batch.',
       '',
       'CUSTOMER-FACING ANSWER',
       '- Write in the language of CUSTOMER_TEXT. For Persian, use fluent, natural Persian suitable for a human support conversation.',
@@ -129,7 +133,15 @@ export class OpenAiAdapter implements EmbeddingProvider, GroundedAnswerer {
       'If a customer writes casually, for example «داداش قیمتش چنده؟؟؟», do not copy «داداش», the repeated punctuation, or the casual tone. Give the supported price in the same fixed professional support voice.',
     ].join('\n');
     const userPayload = JSON.stringify({
-      CUSTOMER_TEXT: input.customerText,
+      CURRENT_MESSAGE_BATCH: (
+        input.currentMessageBatch ?? [
+          { id: 'current', text: input.customerText, sentAt: new Date() },
+        ]
+      ).map((message) => ({
+        id: message.id,
+        text: message.text,
+        sentAt: message.sentAt.toISOString(),
+      })),
       CONTEXT: input.context.map((message) => ({
         senderType: message.senderType,
         text: message.text,

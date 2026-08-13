@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
+import { BrowserRouter, Navigate, Route, Routes, useParams } from 'react-router-dom';
 import { initializeTelegram } from '../core/telegram';
 import { AppShell } from './AppShell';
 import { SessionProvider, useSession } from './SessionProvider';
@@ -7,12 +7,7 @@ import { ToastProvider } from './ToastProvider';
 import { ThemeProvider } from './ThemeProvider';
 import { OverviewPage, ConnectionsPage, SystemPage } from '../features/overview/OverviewPages';
 import { SettingsPage } from '../features/settings/AiSettingsPage';
-import {
-  ConversationDetailPage,
-  ConversationsPage,
-  HandoffDetailPage,
-  HandoffsPage,
-} from '../features/support/SupportPages';
+import { HandoffDetailPage, HandoffsPage, AiBacklogPage } from '../features/support/SupportPages';
 import {
   DraftEditorPage,
   KnowledgeDetailPage,
@@ -48,6 +43,11 @@ function CapabilityRoute({
   );
 }
 
+function LegacyConversationRedirect() {
+  const { id } = useParams();
+  return <Navigate to={id ? `/handoffs/${encodeURIComponent(id)}` : '/handoffs'} replace />;
+}
+
 export function App() {
   return (
     <QueryClientProvider client={queryClient}>
@@ -61,8 +61,9 @@ export function App() {
                   <Route path="overview" element={<OverviewPage />} />
                   <Route path="handoffs" element={<HandoffsPage />} />
                   <Route path="handoffs/:conversationId" element={<HandoffDetailPage />} />
-                  <Route path="conversations" element={<ConversationsPage />} />
-                  <Route path="conversations/:id" element={<ConversationDetailPage />} />
+                  <Route path="conversations" element={<LegacyConversationRedirect />} />
+                  <Route path="conversations/:id" element={<LegacyConversationRedirect />} />
+                  <Route path="ai-backlog" element={<AiBacklogPage />} />
                   <Route
                     path="knowledge"
                     element={

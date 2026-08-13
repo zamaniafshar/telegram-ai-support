@@ -180,9 +180,11 @@ The Persian RTL interface includes responsive mobile/desktop navigation, Telegra
 - Schedule values are business-local wall-clock times, evaluated with IANA timezone and daylight-saving rules independently of the server and administrator browser. Intervals are half-open: start inclusive and end exclusive.
 - Overnight intervals are explicit: `06:00–01:00` runs from 06:00 through 01:00 the following day. Invalid and same-day/cross-day overlapping intervals are rejected.
 - Precedence is master switch, working hours, conversation human mode, connection/can-reply permission, then Telegram reply window. Every condition must allow the response.
-- The current outside-hours policy is explicit `SILENT`: store the message, skip retrieval/embeddings/model/send, create no automatic handoff, and do not queue delayed processing.
-- Workers read MySQL before AI work and immediately before every AI send. A mid-generation disable suppresses sending as a successful non-retry outcome.
-- Re-enabling applies only to new messages. It never processes skipped messages, proactively contacts customers, or changes existing conversation modes.
+- Outside-hours and manual-shutdown behavior is configurable as `QUEUE`, `HANDOFF`, or `SILENT`; `QUEUE` is the default. Queued messages are durable and resume as one conversation batch when availability returns.
+- Workers read MySQL before AI work and immediately before every AI send. A mid-generation disable suppresses sending and returns the batch to the durable waiting state.
+- Re-enabling or changing the schedule/timezone is discovered by worker polling, including after restarts, and releases eligible fresh backlog work.
+- Cost controls reserve quota before retrieval, embeddings, or chat generation. Defaults allow 10 automated responses per customer/hour and 30/day, plus a business-wide ceiling of 100/hour and 500/day. Customer and business cooldowns, maximum batch message count, and maximum batch characters are configurable with the `AI_*` environment variables in `.env.example`.
+- Rate-limited and oversized batches remain stored but are marked with an explicit suppression reason. Audit metadata records counts and reason codes, never copied customer text.
 - `OWNER` and `ADMIN` can view and edit; `SUPPORT` is read-only. Mutations require session authentication, CSRF, idempotency, tenant assignment, and optimistic settings versioning.
 - Master, hours, and timezone changes plus suppressed responses are written to `AuditLog` with business/correlation context and without full customer text. Operational health includes current availability, next transition, and suppression/change counts.
 

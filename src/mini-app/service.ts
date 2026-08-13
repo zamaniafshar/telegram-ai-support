@@ -26,6 +26,7 @@ import {
   validateWeeklySchedule,
   type AiAvailabilityService,
   type WeeklySchedule,
+  type QueuePolicy,
 } from '../ai/availability.js';
 import type { AdminNotifier } from '../telegram-admin/notifier.js';
 
@@ -135,50 +136,71 @@ export class MiniAppManagementService {
     options: { status?: string | undefined; query?: string | undefined },
   ) {
     requireBusiness(context, businessAccountId);
-    const statuses = options.status
-      ? options.status
-          .split(',')
-          .filter((value): value is HandoffStatus =>
-            Object.values(HandoffStatus).includes(value as HandoffStatus),
-          )
-      : [];
-    const items = await this.prisma.handoff.findMany({
+    const requestedStatus = options.status
+      ? Object.values(HandoffStatus).find((value) => value === options.status)
+      : undefined;
+    const conversations = await this.prisma.conversation.findMany({
       where: {
-        conversation: {
-          businessAccountId,
-          ...(options.query
-            ? {
-                customer: {
-                  OR: [
-                    { firstName: { contains: options.query } },
-                    { lastName: { contains: options.query } },
-                    { username: { contains: options.query } },
-                  ],
+        businessAccountId,
+        ...(options.query
+          ? {
+              OR: [
+                {
+                  customer: {
+                    OR: [
+                      { firstName: { contains: options.query } },
+                      { lastName: { contains: options.query } },
+                      { username: { contains: options.query } },
+                    ],
+                  },
                 },
-              }
-            : {}),
+                { messages: { some: { deletedAt: null, text: { contains: options.query } } } },
+              ],
+            }
+          : {}),
+      },
+      orderBy: { updatedAt: 'desc' },
+      take: 200,
+      include: {
+        customer: true,
+        handoffs: { orderBy: { startedAt: 'desc' }, take: 1 },
+        messages: {
+          where: { deletedAt: null },
+          orderBy: { sentAt: 'desc' },
+          take: 1,
+          select: { id: true, text: true, senderType: true, sentAt: true },
         },
-        ...(statuses.length ? { status: { in: statuses } } : {}),
       },
-      orderBy: { startedAt: 'desc' },
-      take: 100,
-      include: { conversation: { include: { customer: true } } },
     });
-    return items.map((item) => ({
-      id: item.id,
-      conversationId: item.conversationId,
-      status: item.status,
-      reasonCode: item.reasonCode,
-      startedAt: item.startedAt,
-      expiresAt: item.expiresAt,
-      claimedBy: item.claimedBy,
-      customer: {
-        name: customerName(item.conversation.customer),
-        username: item.conversation.customer.username,
-        telegramUserId: item.conversation.customer.telegramUserId.toString(),
-      },
-      mode: item.conversation.mode,
-    }));
+    return conversations
+      .map((conversation) => {
+        const handoff = conversation.handoffs[0] ?? null;
+        return {
+          id: handoff?.id ?? conversation.id,
+          conversationId: conversation.id,
+          status: handoff?.status ?? 'NONE',
+          reasonCode: handoff?.reasonCode ?? 'NO_HANDOFF',
+          startedAt: handoff?.startedAt ?? conversation.updatedAt,
+          expiresAt: handoff?.expiresAt ?? conversation.telegramReplyWindowExpiresAt,
+          claimedBy: handoff?.claimedBy ?? null,
+          customer: {
+            name: customerName(conversation.customer),
+            username: conversation.customer.username,
+            telegramUserId: conversation.customer.telegramUserId.toString(),
+          },
+          mode: conversation.mode,
+          updatedAt: conversation.updatedAt,
+          lastMessage: conversation.messages[0] ?? null,
+        };
+      })
+      .filter((item) => !requestedStatus || item.status === requestedStatus)
+      .sort((left, right) => {
+        const leftWaiting = left.status === HandoffStatus.WAITING ? 1 : 0;
+        const rightWaiting = right.status === HandoffStatus.WAITING ? 1 : 0;
+        if (leftWaiting !== rightWaiting) return rightWaiting - leftWaiting;
+        return right.updatedAt.getTime() - left.updatedAt.getTime();
+      })
+      .slice(0, 100);
   }
 
   async handoffDetails(
@@ -215,7 +237,7 @@ export class MiniAppManagementService {
       },
       activeHandoff: active,
       history: conversation.handoffs,
-      messages: [...conversation.messages].reverse(),
+      messages: conversation.messages,
       capabilities: {
         canClaim: Boolean(active && !active.claimedBy),
         canAcknowledge: active?.status === HandoffStatus.WAITING,
@@ -324,7 +346,7 @@ export class MiniAppManagementService {
         username: conversation.customer.username,
         telegramUserId: conversation.customer.telegramUserId.toString(),
       },
-      messages: [...conversation.messages].reverse().map((message) => ({
+      messages: conversation.messages.map((message) => ({
         ...message,
         processingErrorCode: showDiagnostics ? message.processingErrorCode : undefined,
       })),
@@ -796,7 +818,11 @@ export class MiniAppManagementService {
       weeklySchedule:
         (settings?.weeklySchedule as unknown as WeeklySchedule | undefined) ??
         defaultWeeklySchedule(),
-      outsideHoursPolicy: 'SILENT' as const,
+      outsideHoursPolicy:
+        (settings?.outsideHoursPolicy as QueuePolicy | undefined) ?? ('QUEUE' as const),
+      manualShutdownPolicy:
+        (settings?.manualShutdownPolicy as QueuePolicy | undefined) ?? ('QUEUE' as const),
+      backlogMaxAgeHours: settings?.backlogMaxAgeHours ?? 24,
       version: settings?.version ?? 0,
       updatedAt: settings?.updatedAt ?? null,
       updatedBy: settings?.updatedByAdmin ?? null,
@@ -819,6 +845,9 @@ export class MiniAppManagementService {
       enabled: boolean;
       timezone: string;
       weeklySchedule: WeeklySchedule;
+      outsideHoursPolicy: QueuePolicy;
+      manualShutdownPolicy: QueuePolicy;
+      backlogMaxAgeHours: number;
       version: number;
       reason?: string | undefined;
     },
@@ -847,7 +876,9 @@ export class MiniAppManagementService {
             enabled: input.enabled,
             timezone: input.timezone,
             weeklySchedule: schedule as unknown as Prisma.InputJsonValue,
-            outsideHoursPolicy: 'SILENT',
+            outsideHoursPolicy: input.outsideHoursPolicy,
+            manualShutdownPolicy: input.manualShutdownPolicy,
+            backlogMaxAgeHours: input.backlogMaxAgeHours,
             version: 1,
             lastChangeReason: reason,
             updatedByAdminId: context.admin.id,
@@ -860,6 +891,9 @@ export class MiniAppManagementService {
             enabled: input.enabled,
             timezone: input.timezone,
             weeklySchedule: schedule as unknown as Prisma.InputJsonValue,
+            outsideHoursPolicy: input.outsideHoursPolicy,
+            manualShutdownPolicy: input.manualShutdownPolicy,
+            backlogMaxAgeHours: input.backlogMaxAgeHours,
             version: { increment: 1 },
             lastChangeReason: reason,
             updatedByAdminId: context.admin.id,
@@ -923,6 +957,111 @@ export class MiniAppManagementService {
       return saved;
     });
     return this.aiSettings(context, businessAccountId);
+  }
+
+  async aiBacklog(context: MiniAppSessionContext, businessAccountId: string) {
+    requireBusiness(context, businessAccountId);
+    const now = new Date();
+    const jobs = await this.prisma.conversationJob.findMany({
+      where: {
+        status: 'WAITING_FOR_AI_AVAILABILITY',
+        conversation: { businessAccountId },
+      },
+      orderBy: { createdAt: 'asc' },
+      include: {
+        message: { select: { sentAt: true } },
+        conversation: {
+          include: {
+            customer: true,
+            messages: {
+              where: { processingStatus: 'WAITING_FOR_AI_AVAILABILITY' },
+              select: { id: true },
+            },
+          },
+        },
+      },
+    });
+    const grouped = new Map<string, (typeof jobs)[number]>();
+    for (const job of jobs)
+      if (!grouped.has(job.conversationId)) grouped.set(job.conversationId, job);
+    const availability = this.availability
+      ? await this.availability.check({ businessAccountId })
+      : null;
+    return {
+      waitingConversations: grouped.size,
+      oldestWaitingAt: jobs[0]?.message.sentAt ?? null,
+      nextAiActivationAt:
+        availability?.nextTransitionReason === 'ACTIVATES' ? availability.nextTransitionAt : null,
+      aiAvailable: availability?.available ?? false,
+      conversations: [...grouped.values()].map((job) => ({
+        conversationId: job.conversationId,
+        customer: {
+          name: customerName(job.conversation.customer),
+          username: job.conversation.customer.username,
+        },
+        queuedMessageCount: job.conversation.messages.length,
+        waitingReason: job.waitingReason,
+        oldestWaitingAt: job.message.sentAt,
+        mode: job.conversation.mode,
+        replyWindowOpen: Boolean(
+          job.conversation.telegramReplyWindowExpiresAt &&
+          job.conversation.telegramReplyWindowExpiresAt > now,
+        ),
+        replyWindowExpiresAt: job.conversation.telegramReplyWindowExpiresAt,
+      })),
+    };
+  }
+
+  async manageAiBacklog(
+    context: MiniAppSessionContext,
+    businessAccountId: string,
+    conversationId: string,
+    action: 'handoff' | 'cancel' | 'process-now',
+  ): Promise<void> {
+    requireRole(context, AdminRole.ADMIN);
+    requireBusiness(context, businessAccountId);
+    const conversation = await this.prisma.conversation.findFirst({
+      where: { id: conversationId, businessAccountId },
+    });
+    if (!conversation) throw new ResourceUnavailableError();
+    if (action === 'handoff') {
+      await this.handoffs.activate(
+        conversationId,
+        'ADMIN_BACKLOG_HANDOFF',
+        'Backlog manually handed off',
+      );
+      await this.prisma.conversationJob.updateMany({
+        where: { conversationId, status: 'WAITING_FOR_AI_AVAILABILITY' },
+        data: { status: 'CANCELLED_BY_HUMAN', lastErrorCode: 'ADMIN_HANDOFF' },
+      });
+      await this.prisma.message.updateMany({
+        where: { conversationId, processingStatus: 'WAITING_FOR_AI_AVAILABILITY' },
+        data: { processingStatus: 'CANCELLED_BY_HUMAN', processingErrorCode: 'ADMIN_HANDOFF' },
+      });
+      return;
+    }
+    if (action === 'cancel') {
+      await this.prisma.conversationJob.updateMany({
+        where: { conversationId, status: 'WAITING_FOR_AI_AVAILABILITY' },
+        data: { status: 'SUPERSEDED', lastErrorCode: 'ADMIN_CANCELLED' },
+      });
+      await this.prisma.message.updateMany({
+        where: { conversationId, processingStatus: 'WAITING_FOR_AI_AVAILABILITY' },
+        data: { processingStatus: 'SUPERSEDED', processingErrorCode: 'ADMIN_CANCELLED' },
+      });
+      return;
+    }
+    if (!this.availability) throw new AppError('Availability service missing', 'INTERNAL_ERROR');
+    const current = await this.availability.check({ businessAccountId, conversationId });
+    if (!current.available) throw new AppError('AI is unavailable', 'AI_UNAVAILABLE', 409);
+    await this.prisma.conversationJob.updateMany({
+      where: { conversationId, status: 'WAITING_FOR_AI_AVAILABILITY' },
+      data: { status: 'READY', processAfter: new Date(), waitingReason: null },
+    });
+    await this.prisma.message.updateMany({
+      where: { conversationId, processingStatus: 'WAITING_FOR_AI_AVAILABILITY' },
+      data: { processingStatus: 'READY', processingErrorCode: null },
+    });
   }
 
   async notifications(context: MiniAppSessionContext) {

@@ -26,7 +26,8 @@ export interface DaySchedule {
 }
 
 export type WeeklySchedule = DaySchedule[];
-export type OutsideHoursPolicy = 'SILENT';
+export type QueuePolicy = 'QUEUE' | 'HANDOFF' | 'SILENT';
+export type OutsideHoursPolicy = QueuePolicy;
 
 export type AiAvailabilityReason =
   | 'AVAILABLE'
@@ -51,6 +52,8 @@ export interface BusinessAiSettingsValue {
   timezone: string;
   weeklySchedule: WeeklySchedule;
   outsideHoursPolicy: OutsideHoursPolicy;
+  manualShutdownPolicy: QueuePolicy;
+  backlogMaxAgeHours: number;
 }
 
 const jsDayByName: Record<Weekday, number> = {
@@ -226,7 +229,9 @@ export class AiAvailabilityService {
       enabled: settings?.enabled ?? true,
       timezone: settings?.timezone ?? this.defaultTimezone,
       weeklySchedule: parseSchedule(settings?.weeklySchedule),
-      outsideHoursPolicy: 'SILENT',
+      outsideHoursPolicy: (settings?.outsideHoursPolicy as QueuePolicy | undefined) ?? 'QUEUE',
+      manualShutdownPolicy: (settings?.manualShutdownPolicy as QueuePolicy | undefined) ?? 'QUEUE',
+      backlogMaxAgeHours: settings?.backlogMaxAgeHours ?? 24,
     };
   }
 

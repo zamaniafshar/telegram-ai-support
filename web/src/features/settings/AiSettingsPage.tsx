@@ -23,7 +23,9 @@ interface AiSettings {
   enabled: boolean;
   timezone: string;
   weeklySchedule: DaySchedule[];
-  outsideHoursPolicy: 'SILENT';
+  outsideHoursPolicy: 'QUEUE' | 'HANDOFF' | 'SILENT';
+  manualShutdownPolicy: 'QUEUE' | 'HANDOFF' | 'SILENT';
+  backlogMaxAgeHours: number;
   version: number;
   updatedAt: string | null;
   updatedBy: { id: string; displayName: string | null } | null;
@@ -102,6 +104,11 @@ export function SettingsPage() {
   });
   const [schedule, setSchedule] = useState<DaySchedule[]>([]);
   const [timezone, setTimezone] = useState('Asia/Tehran');
+  const [outsideHoursPolicy, setOutsideHoursPolicy] =
+    useState<AiSettings['outsideHoursPolicy']>('QUEUE');
+  const [manualShutdownPolicy, setManualShutdownPolicy] =
+    useState<AiSettings['manualShutdownPolicy']>('QUEUE');
+  const [backlogMaxAgeHours, setBacklogMaxAgeHours] = useState(24);
   const [confirmState, setConfirmState] = useState<boolean | null>(null);
   const [reason, setReason] = useState('');
   const [initializedVersion, setInitializedVersion] = useState<number | null>(null);
@@ -110,12 +117,18 @@ export function SettingsPage() {
     if (!query.data || initializedVersion === query.data.version) return;
     setSchedule(deepCopy(query.data.weeklySchedule));
     setTimezone(query.data.timezone);
+    setOutsideHoursPolicy(query.data.outsideHoursPolicy);
+    setManualShutdownPolicy(query.data.manualShutdownPolicy);
+    setBacklogMaxAgeHours(query.data.backlogMaxAgeHours);
     setInitializedVersion(query.data.version);
   }, [initializedVersion, query.data]);
 
   const dirty = Boolean(
     query.data &&
     (timezone !== query.data.timezone ||
+      outsideHoursPolicy !== query.data.outsideHoursPolicy ||
+      manualShutdownPolicy !== query.data.manualShutdownPolicy ||
+      backlogMaxAgeHours !== query.data.backlogMaxAgeHours ||
       JSON.stringify(schedule) !== JSON.stringify(query.data.weeklySchedule)),
   );
   useEffect(() => {
@@ -142,6 +155,9 @@ export function SettingsPage() {
           enabled: input.enabled,
           timezone: input.timezone,
           weeklySchedule: input.schedule,
+          outsideHoursPolicy,
+          manualShutdownPolicy,
+          backlogMaxAgeHours,
           version: query.data.version,
           ...(input.reason ? { reason: input.reason } : {}),
         }),
@@ -151,6 +167,9 @@ export function SettingsPage() {
       queryClient.setQueryData(queryKey, saved);
       setSchedule(deepCopy(saved.weeklySchedule));
       setTimezone(saved.timezone);
+      setOutsideHoursPolicy(saved.outsideHoursPolicy);
+      setManualShutdownPolicy(saved.manualShutdownPolicy);
+      setBacklogMaxAgeHours(saved.backlogMaxAgeHours);
       setInitializedVersion(saved.version);
       setConfirmState(null);
       setReason('');
@@ -263,6 +282,60 @@ export function SettingsPage() {
               {!query.data.canEdit && (
                 <p className="readonly-note">نقش پشتیبانی فقط اجازهٔ مشاهدهٔ تنظیمات را دارد.</p>
               )}
+            </Card>
+
+            <Card title="سیاست پیام‌های زمان توقف">
+              <p className="muted">
+                مشخص کنید پیام‌های دریافت‌شده هنگام توقف پاسخ‌گویی چه سرنوشتی داشته باشند.
+              </p>
+              <label className="field">
+                خارج از ساعت کاری
+                <select
+                  value={outsideHoursPolicy}
+                  disabled={!query.data.canEdit}
+                  onChange={(event) =>
+                    setOutsideHoursPolicy(event.target.value as AiSettings['outsideHoursPolicy'])
+                  }
+                >
+                  <option value="QUEUE">نگهداری پیام‌ها و پاسخ پس از فعال‌شدن</option>
+                  <option value="HANDOFF">ارجاع فوری به پشتیبان انسانی</option>
+                  <option value="SILENT">ذخیره بدون پاسخ خودکار</option>
+                </select>
+                <small>
+                  نگهداری، پیام‌ها را پس از شروع ساعت کاری در یک پاسخ یکپارچه پردازش می‌کند.
+                </small>
+              </label>
+              <label className="field">
+                خاموش‌کردن دستی
+                <select
+                  value={manualShutdownPolicy}
+                  disabled={!query.data.canEdit}
+                  onChange={(event) =>
+                    setManualShutdownPolicy(
+                      event.target.value as AiSettings['manualShutdownPolicy'],
+                    )
+                  }
+                >
+                  <option value="QUEUE">نگهداری پیام‌ها و پاسخ پس از فعال‌شدن</option>
+                  <option value="HANDOFF">ارجاع فوری به پشتیبان انسانی</option>
+                  <option value="SILENT">ذخیره بدون پاسخ خودکار</option>
+                </select>
+                <small>
+                  ارجاع، رسیدگی را بلافاصله انسانی می‌کند؛ ذخیرهٔ خاموش بعداً پاسخ خودکار نمی‌فرستد.
+                </small>
+              </label>
+              <label className="field">
+                حداکثر زمان انتظار پیام‌ها برای پاسخ خودکار
+                <input
+                  type="number"
+                  min={1}
+                  max={48}
+                  value={backlogMaxAgeHours}
+                  disabled={!query.data.canEdit}
+                  onChange={(event) => setBacklogMaxAgeHours(Number(event.target.value))}
+                />
+                <small>ساعت؛ پاسخ هرگز پس از پایان پنجرهٔ معتبر تلگرام ارسال نمی‌شود.</small>
+              </label>
             </Card>
 
             <Card title="برنامهٔ هفتگی">

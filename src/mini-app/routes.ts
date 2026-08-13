@@ -38,6 +38,9 @@ const aiSettingsSchema = z
     timezone: z.string().min(3).max(64),
     weeklySchedule: z.array(dayScheduleSchema).length(7),
     version: z.number().int().nonnegative(),
+    outsideHoursPolicy: z.enum(['QUEUE', 'HANDOFF', 'SILENT']),
+    manualShutdownPolicy: z.enum(['QUEUE', 'HANDOFF', 'SILENT']),
+    backlogMaxAgeHours: z.number().int().min(1).max(48),
     reason: z.string().max(500).optional(),
   })
   .strict();
@@ -218,6 +221,22 @@ function registerMiniAppRoutes(
     const context = await auth.requireSession(request);
     const { businessId, id } = entityParams.parse(request.params);
     return data(await management.conversationDetails(context, businessId, id));
+  });
+
+  app.get('/api/v1/businesses/:businessId/ai-backlog', async (request) => {
+    const context = await auth.requireSession(request);
+    const { businessId } = businessParams.parse(request.params);
+    return data(await management.aiBacklog(context, businessId));
+  });
+
+  app.post('/api/v1/businesses/:businessId/ai-backlog/:conversationId/:action', async (request) => {
+    const context = await mutationContext(request, auth);
+    const { businessId, conversationId } = conversationParams.parse(request.params);
+    const { action } = z
+      .object({ action: z.enum(['handoff', 'cancel', 'process-now']) })
+      .parse(request.params);
+    await management.manageAiBacklog(context, businessId, conversationId, action);
+    return data({ ok: true });
   });
 
   app.get('/api/v1/businesses/:businessId/knowledge', async (request) => {

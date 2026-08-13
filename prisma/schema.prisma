@@ -36,8 +36,13 @@ enum MessageDirection {
 enum MessageProcessingStatus {
   NOT_APPLICABLE
   PENDING
+  WAITING_FOR_AI_AVAILABILITY
+  READY
   PROCESSING
   PROCESSED
+  SUPERSEDED
+  CANCELLED_BY_HUMAN
+  EXPIRED
   FAILED
 }
 
@@ -94,40 +99,51 @@ enum NotificationDeliveryStatus {
 }
 
 model BusinessAccount {
-  id                    String                 @id @db.Char(36)
-  name                  String                 @db.VarChar(200)
-  telegramAccountUserId BigInt?                @unique @db.BigInt
-  defaultLocale         String                 @default("fa") @db.VarChar(12)
-  isActive              Boolean                @default(true)
-  createdAt             DateTime               @default(now())
-  updatedAt             DateTime               @updatedAt
-  connections           BusinessConnection[]
-  customers             Customer[]
-  conversations         Conversation[]
-  knowledgeItems        KnowledgeItem[]
-  knowledgeDrafts       KnowledgeDraft[]
-  adminAccess           AdminBusinessAccount[]
-  auditLogs             AuditLog[]
-  notifications         Notification[]
-  aiSettings            BusinessAiSettings?
+  id                         String                 @id @db.Char(36)
+  name                       String                 @db.VarChar(200)
+  telegramAccountUserId      BigInt?                @unique @db.BigInt
+  defaultLocale              String                 @default("fa") @db.VarChar(12)
+  isActive                   Boolean                @default(true)
+  createdAt                  DateTime               @default(now())
+  updatedAt                  DateTime               @updatedAt
+  aiProcessingLeaseOwner     String?                @db.VarChar(64)
+  aiProcessingLeaseExpiresAt DateTime?
+  aiHourlyWindowStartedAt    DateTime?
+  aiHourlyRequestCount       Int                    @default(0)
+  aiDailyWindowStartedAt     DateTime?
+  aiDailyRequestCount        Int                    @default(0)
+  aiBlockedUntil             DateTime?
+  connections                BusinessConnection[]
+  customers                  Customer[]
+  conversations              Conversation[]
+  knowledgeItems             KnowledgeItem[]
+  knowledgeDrafts            KnowledgeDraft[]
+  adminAccess                AdminBusinessAccount[]
+  auditLogs                  AuditLog[]
+  notifications              Notification[]
+  aiSettings                 BusinessAiSettings?
 
   @@index([isActive])
+  @@index([aiProcessingLeaseExpiresAt])
+  @@index([aiBlockedUntil])
 }
 
 model BusinessAiSettings {
-  id                 String          @id @db.Char(36)
-  businessAccountId  String          @unique @db.Char(36)
-  enabled            Boolean         @default(true)
-  timezone           String          @default("Asia/Tehran") @db.VarChar(64)
-  weeklySchedule     Json
-  outsideHoursPolicy String          @default("SILENT") @db.VarChar(32)
-  version            Int             @default(1)
-  lastChangeReason   String?         @db.VarChar(500)
-  updatedByAdminId   String?         @db.Char(36)
-  createdAt          DateTime        @default(now())
-  updatedAt          DateTime        @updatedAt
-  businessAccount    BusinessAccount @relation(fields: [businessAccountId], references: [id], onDelete: Cascade)
-  updatedByAdmin     Admin?          @relation(fields: [updatedByAdminId], references: [id], onDelete: SetNull)
+  id                   String          @id @db.Char(36)
+  businessAccountId    String          @unique @db.Char(36)
+  enabled              Boolean         @default(true)
+  timezone             String          @default("Asia/Tehran") @db.VarChar(64)
+  weeklySchedule       Json
+  outsideHoursPolicy   String          @default("QUEUE") @db.VarChar(32)
+  manualShutdownPolicy String          @default("QUEUE") @db.VarChar(32)
+  backlogMaxAgeHours   Int             @default(24)
+  version              Int             @default(1)
+  lastChangeReason     String?         @db.VarChar(500)
+  updatedByAdminId     String?         @db.Char(36)
+  createdAt            DateTime        @default(now())
+  updatedAt            DateTime        @updatedAt
+  businessAccount      BusinessAccount @relation(fields: [businessAccountId], references: [id], onDelete: Cascade)
+  updatedByAdmin       Admin?          @relation(fields: [updatedByAdminId], references: [id], onDelete: SetNull)
 
   @@index([enabled])
   @@index([updatedByAdminId])
@@ -181,20 +197,26 @@ model AdminBusinessAccount {
 }
 
 model Customer {
-  id                String          @id @db.Char(36)
-  businessAccountId String          @db.Char(36)
-  telegramUserId    BigInt          @db.BigInt
-  username          String?         @db.VarChar(64)
-  firstName         String?         @db.VarChar(128)
-  lastName          String?         @db.VarChar(128)
-  languageCode      String?         @db.VarChar(12)
-  createdAt         DateTime        @default(now())
-  updatedAt         DateTime        @updatedAt
-  businessAccount   BusinessAccount @relation(fields: [businessAccountId], references: [id], onDelete: Cascade)
-  conversations     Conversation[]
+  id                      String          @id @db.Char(36)
+  businessAccountId       String          @db.Char(36)
+  telegramUserId          BigInt          @db.BigInt
+  username                String?         @db.VarChar(64)
+  firstName               String?         @db.VarChar(128)
+  lastName                String?         @db.VarChar(128)
+  languageCode            String?         @db.VarChar(12)
+  aiHourlyWindowStartedAt DateTime?
+  aiHourlyRequestCount    Int             @default(0)
+  aiDailyWindowStartedAt  DateTime?
+  aiDailyRequestCount     Int             @default(0)
+  aiBlockedUntil          DateTime?
+  createdAt               DateTime        @default(now())
+  updatedAt               DateTime        @updatedAt
+  businessAccount         BusinessAccount @relation(fields: [businessAccountId], references: [id], onDelete: Cascade)
+  conversations           Conversation[]
 
   @@unique([businessAccountId, telegramUserId])
   @@index([username])
+  @@index([aiBlockedUntil])
 }
 
 model Conversation {
@@ -239,6 +261,7 @@ model Message {
   rawMetadata          Json?
   processingStatus     MessageProcessingStatus @default(NOT_APPLICABLE)
   processingErrorCode  String?                 @db.VarChar(100)
+  processingBatchId    String?                 @db.Char(36)
   sourceMessageId      String?                 @unique @db.Char(36)
   sentAt               DateTime
   createdAt            DateTime                @default(now())
@@ -254,21 +277,23 @@ model Message {
 }
 
 model ConversationJob {
-  id              String                  @id @db.Char(36)
-  conversationId  String                  @db.Char(36)
-  messageId       String                  @unique @db.Char(36)
-  status          MessageProcessingStatus @default(PENDING)
-  processAfter    DateTime
-  attempts        Int                     @default(0)
-  maxAttempts     Int                     @default(5)
-  leaseOwner      String?                 @db.VarChar(64)
-  leaseExpiresAt  DateTime?
-  lastErrorCode   String?                 @db.VarChar(100)
-  lastErrorDetail String?                 @db.Text
-  createdAt       DateTime                @default(now())
-  updatedAt       DateTime                @updatedAt
-  conversation    Conversation            @relation(fields: [conversationId], references: [id], onDelete: Cascade)
-  message         Message                 @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  id                String                  @id @db.Char(36)
+  conversationId    String                  @db.Char(36)
+  messageId         String                  @unique @db.Char(36)
+  status            MessageProcessingStatus @default(PENDING)
+  processAfter      DateTime
+  attempts          Int                     @default(0)
+  maxAttempts       Int                     @default(5)
+  leaseOwner        String?                 @db.VarChar(64)
+  leaseExpiresAt    DateTime?
+  lastErrorCode     String?                 @db.VarChar(100)
+  lastErrorDetail   String?                 @db.Text
+  waitingReason     String?                 @db.VarChar(64)
+  processingBatchId String?                 @db.Char(36)
+  createdAt         DateTime                @default(now())
+  updatedAt         DateTime                @updatedAt
+  conversation      Conversation            @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  message           Message                 @relation(fields: [messageId], references: [id], onDelete: Cascade)
 
   @@index([status, processAfter])
   @@index([leaseExpiresAt])
