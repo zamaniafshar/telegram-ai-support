@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useForm } from 'react-hook-form';
@@ -42,6 +42,17 @@ interface KnowledgeDeletion {
   ok: boolean;
   cleanupStatus: 'PENDING' | 'PROCESSING' | 'COMPLETED' | 'RETRY';
   cleanupJobId: string;
+}
+
+function resizeDescriptionTextarea(element: HTMLTextAreaElement): void {
+  element.style.height = 'auto';
+  const configuredMaxHeight = Number.parseFloat(getComputedStyle(element).maxHeight);
+  const contentHeight = element.scrollHeight;
+  const height = Number.isFinite(configuredMaxHeight)
+    ? Math.min(contentHeight, configuredMaxHeight)
+    : contentHeight;
+  element.style.height = `${height}px`;
+  element.style.overflowY = contentHeight > height ? 'auto' : 'hidden';
 }
 
 export function KnowledgePage() {
@@ -335,6 +346,7 @@ export function DraftEditorPage() {
   const toast = useToast();
   const [draft, setDraft] = useState<KnowledgeDraft | null>(null);
   const [preview, setPreview] = useState<PreviewChunk[]>([]);
+  const descriptionTextarea = useRef<HTMLTextAreaElement | null>(null);
   const query = useQuery({
     queryKey: ['knowledge-draft', businessPath(''), id],
     queryFn: () =>
@@ -350,6 +362,19 @@ export function DraftEditorPage() {
       form.reset({ title: query.data.title, description: query.data.description });
     }
   }, [form, query.data]);
+  useEffect(() => {
+    const resize = () => {
+      if (descriptionTextarea.current) resizeDescriptionTextarea(descriptionTextarea.current);
+    };
+    const animationFrame = requestAnimationFrame(resize);
+    window.addEventListener('resize', resize);
+    window.visualViewport?.addEventListener('resize', resize);
+    return () => {
+      cancelAnimationFrame(animationFrame);
+      window.removeEventListener('resize', resize);
+      window.visualViewport?.removeEventListener('resize', resize);
+    };
+  }, [query.data?.description]);
   const dirty = form.formState.isDirty;
   useEffect(() => {
     if (dirty) telegram?.enableClosingConfirmation?.();
@@ -414,6 +439,7 @@ export function DraftEditorPage() {
     }
   }, [businessPath, confirm, dirty, draft, id, navigate, save, toast]);
   useTelegramMainButton('انتشار دانش', () => void publish(), Boolean(draft));
+  const descriptionField = form.register('description');
   return (
     <QueryState pending={query.isPending} error={query.error}>
       {draft && (
@@ -442,7 +468,13 @@ export function DraftEditorPage() {
               <label className="field">
                 توضیحات کامل
                 <textarea
-                  {...form.register('description')}
+                  {...descriptionField}
+                  ref={(element) => {
+                    descriptionField.ref(element);
+                    descriptionTextarea.current = element;
+                  }}
+                  className="knowledge-description-textarea"
+                  onInput={(event) => resizeDescriptionTextarea(event.currentTarget)}
                   maxLength={100000}
                   placeholder="اطلاعات دقیق و قابل استناد را بنویسید"
                 />

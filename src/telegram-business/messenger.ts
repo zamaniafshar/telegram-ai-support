@@ -11,6 +11,8 @@ import type { TelegramApi } from './client.js';
 import { AppError } from '../utils/errors.js';
 import { newId, telegramId } from '../utils/ids.js';
 
+const typingRefreshMs = 4_000;
+
 export class BusinessMessenger {
   constructor(
     private readonly prisma: PrismaClient,
@@ -21,6 +23,52 @@ export class BusinessMessenger {
 
   async sendAiAnswer(conversationId: string, text: string, sourceMessageId: string): Promise<void> {
     await this.#send(conversationId, text, SenderType.AI, false, sourceMessageId);
+  }
+
+  async whileTyping<T>(conversationId: string, operation: () => Promise<T>): Promise<T> {
+    const conversation = await this.prisma.conversation.findUniqueOrThrow({
+      where: { id: conversationId },
+      select: {
+        telegramChatId: true,
+        businessAccount: {
+          select: { connections: { orderBy: { updatedAt: 'desc' }, take: 1 } },
+        },
+      },
+    });
+    const connection = conversation.businessAccount.connections[0];
+    if (!connection?.enabled || !connection.canReply) return operation();
+
+    let stopped = false;
+    let requestInFlight = false;
+    const abortController = new AbortController();
+    const sendTyping = (): void => {
+      if (stopped || requestInFlight) return;
+      requestInFlight = true;
+      void this.telegram
+        .sendChatAction(conversation.telegramChatId, 'typing', {
+          businessConnectionId: connection.id,
+          signal: abortController.signal,
+        })
+        .catch((error: unknown) => {
+          if (!stopped) {
+            this.logger.debug({ err: error, conversationId }, 'typing indicator failed');
+          }
+        })
+        .finally(() => {
+          requestInFlight = false;
+        });
+    };
+
+    sendTyping();
+    const refreshTimer = setInterval(sendTyping, typingRefreshMs);
+    refreshTimer.unref();
+    try {
+      return await operation();
+    } finally {
+      stopped = true;
+      clearInterval(refreshTimer);
+      abortController.abort();
+    }
   }
 
   async sendHandoffAcknowledgement(

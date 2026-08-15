@@ -306,15 +306,29 @@ export class BusinessUpdateIngestor {
         },
       });
       if (incomingCustomer && content) {
+        const processAfter = millisecondsFrom(new Date(), this.config.rag.debounceMs);
         await tx.conversationJob.upsert({
           where: { messageId: message.id },
           create: {
             id: newId(),
             conversationId: conversation.id,
             messageId: message.id,
-            processAfter: millisecondsFrom(new Date(), this.config.rag.debounceMs),
+            processAfter,
           },
           update: {},
+        });
+        await tx.conversationJob.updateMany({
+          where: {
+            conversationId: conversation.id,
+            status: {
+              in: [
+                MessageProcessingStatus.PENDING,
+                MessageProcessingStatus.READY,
+                MessageProcessingStatus.WAITING_FOR_AI_AVAILABILITY,
+              ],
+            },
+          },
+          data: { processAfter },
         });
       }
       return {

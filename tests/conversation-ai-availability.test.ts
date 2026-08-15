@@ -97,7 +97,13 @@ function harness(reasons: string[], texts = ['سؤال درباره محصول']
       latencyMs: 1,
     }),
   };
-  const messenger = { sendAiAnswer: vi.fn(), sendHandoffAcknowledgement: vi.fn() };
+  const messenger = {
+    sendAiAnswer: vi.fn(),
+    sendHandoffAcknowledgement: vi.fn(),
+    whileTyping: vi.fn(async (_conversationId: string, operation: () => Promise<unknown>) =>
+      operation(),
+    ),
+  };
   const availability = {
     businessSettings: vi.fn().mockResolvedValue({
       enabled: true,

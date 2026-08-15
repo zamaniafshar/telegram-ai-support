@@ -1,5 +1,5 @@
 import { ConversationMode, SenderType } from '@prisma/client';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { BusinessMessenger } from '../src/telegram-business/messenger.js';
 import { silentLogger, testConfig } from './helpers.js';
 
@@ -76,5 +76,80 @@ describe('business message read timing', () => {
     await messenger.sendHandoffAcknowledgement('conversation-1', 'handoff', 'source-1');
 
     expect(telegram.readBusinessMessage).not.toHaveBeenCalled();
+  });
+});
+
+describe('business typing indicator', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('shows typing during processing and stops refreshing when processing finishes', async () => {
+    vi.useFakeTimers();
+    const prisma = {
+      conversation: {
+        findUniqueOrThrow: vi.fn().mockResolvedValue(conversation(ConversationMode.AI)),
+      },
+    };
+    const telegram = {
+      sendChatAction: vi.fn().mockResolvedValue(undefined),
+    };
+    const messenger = new BusinessMessenger(
+      prisma as never,
+      telegram as never,
+      testConfig(),
+      silentLogger,
+    );
+    let finishOperation: ((value: string) => void) | undefined;
+    const operation = vi.fn(
+      () =>
+        new Promise<string>((resolve) => {
+          finishOperation = resolve;
+        }),
+    );
+
+    const resultPromise = messenger.whileTyping('conversation-1', operation);
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(telegram.sendChatAction).toHaveBeenCalledWith(
+      123n,
+      'typing',
+      expect.objectContaining({ businessConnectionId: 'connection-1' }),
+    );
+    const firstOptions = telegram.sendChatAction.mock.calls[0]?.[2] as
+      { signal: AbortSignal } | undefined;
+    expect(firstOptions?.signal.aborted).toBe(false);
+    expect(telegram.sendChatAction).toHaveBeenCalledTimes(1);
+
+    await vi.advanceTimersByTimeAsync(8_000);
+    expect(telegram.sendChatAction).toHaveBeenCalledTimes(3);
+
+    finishOperation?.('answer');
+    await expect(resultPromise).resolves.toBe('answer');
+    expect(firstOptions?.signal.aborted).toBe(true);
+    await vi.advanceTimersByTimeAsync(8_000);
+
+    expect(telegram.sendChatAction).toHaveBeenCalledTimes(3);
+  });
+
+  it('does not let a rejected typing action fail processing', async () => {
+    const prisma = {
+      conversation: {
+        findUniqueOrThrow: vi.fn().mockResolvedValue(conversation(ConversationMode.AI)),
+      },
+    };
+    const telegram = {
+      sendChatAction: vi.fn().mockRejectedValue(new Error('Telegram unavailable')),
+    };
+    const messenger = new BusinessMessenger(
+      prisma as never,
+      telegram as never,
+      testConfig(),
+      silentLogger,
+    );
+
+    await expect(messenger.whileTyping('conversation-1', async () => 'answer')).resolves.toBe(
+      'answer',
+    );
   });
 });

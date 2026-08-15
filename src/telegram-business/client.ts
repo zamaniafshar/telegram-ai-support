@@ -24,12 +24,18 @@ export interface SendMessageOptions {
   disableWebPagePreview?: boolean;
 }
 
+export interface SendChatActionOptions {
+  businessConnectionId?: string;
+  signal?: AbortSignal;
+}
+
 export interface TelegramApi {
   sendMessage(
     chatId: bigint,
     text: string,
     options?: SendMessageOptions,
   ): Promise<SentTelegramMessage>;
+  sendChatAction(chatId: bigint, action: 'typing', options?: SendChatActionOptions): Promise<void>;
   getBusinessConnection(id: string): Promise<BusinessConnectionUpdate>;
   readBusinessMessage(
     businessConnectionId: string,
@@ -73,6 +79,7 @@ export class TelegramBotApiClient implements TelegramApi {
     method: string,
     body: Record<string, unknown>,
     requestTimeoutMs: number,
+    externalSignal?: AbortSignal,
   ): Promise<T> {
     let response: Response;
     try {
@@ -82,7 +89,9 @@ export class TelegramBotApiClient implements TelegramApi {
         body: JSON.stringify(body, (_, value: unknown) =>
           typeof value === 'bigint' ? value.toString() : value,
         ),
-        signal: AbortSignal.timeout(requestTimeoutMs),
+        signal: externalSignal
+          ? AbortSignal.any([externalSignal, AbortSignal.timeout(requestTimeoutMs)])
+          : AbortSignal.timeout(requestTimeoutMs),
       });
     } catch (error) {
       throw new AppError(`Telegram ${method} request failed`, 'TELEGRAM_NETWORK_ERROR', 502, true, {
@@ -125,6 +134,25 @@ export class TelegramBotApiClient implements TelegramApi {
       ...(options.disableWebPagePreview ? { link_preview_options: { is_disabled: true } } : {}),
     });
     return telegramMessageSchema.parse(result) as SentTelegramMessage;
+  }
+
+  async sendChatAction(
+    chatId: bigint,
+    action: 'typing',
+    options: SendChatActionOptions = {},
+  ): Promise<void> {
+    await this.#callOnce(
+      'sendChatAction',
+      {
+        chat_id: chatId,
+        action,
+        ...(options.businessConnectionId
+          ? { business_connection_id: options.businessConnectionId }
+          : {}),
+      },
+      Math.min(this.timeoutMs, 5_000),
+      options.signal,
+    );
   }
 
   async getBusinessConnection(id: string): Promise<BusinessConnectionUpdate> {

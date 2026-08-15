@@ -384,15 +384,21 @@ export class ConversationProcessor {
 
     let answer: string | null = route.kind === 'SAFE_GREETING' ? route.answer : null;
     if (!answer) {
-      const retrieval = await this.#retrieveWithTrace(conversation.businessAccountId, customerText);
-      await this.#recordRetrieval(firstJob.messageId, retrieval);
-      const decision = await this.answerer.decide({
-        customerText,
-        currentMessageBatch,
-        retrieved: retrieval.validated,
-        context,
+      const decision = await this.messenger.whileTyping(conversationId, async () => {
+        const retrieval = await this.#retrieveWithTrace(
+          conversation.businessAccountId,
+          customerText,
+        );
+        await this.#recordRetrieval(firstJob.messageId, retrieval);
+        const result = await this.answerer.decide({
+          customerText,
+          currentMessageBatch,
+          retrieved: retrieval.validated,
+          context,
+        });
+        await this.#recordDecision(firstJob, result, retrieval.validated);
+        return result;
       });
-      await this.#recordDecision(firstJob, decision, retrieval.validated);
       if (!decision.answerable || !decision.answer) {
         await this.#activateHandoff(
           conversationId,

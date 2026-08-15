@@ -707,6 +707,10 @@ button.list-card:hover {
   resize: vertical;
   line-height: 1.8;
 }
+.field .knowledge-description-textarea {
+  max-height: min(70dvh, 720px);
+  overflow-y: hidden;
+}
 .field small {
   color: var(--muted);
   font-weight: 400;
