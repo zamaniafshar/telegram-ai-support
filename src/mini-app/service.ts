@@ -130,6 +130,211 @@ export class MiniAppManagementService {
     };
   }
 
+  async analyticsOverview(
+    context: MiniAppSessionContext,
+    businessAccountId: string,
+    options: { from?: Date | undefined; to?: Date | undefined; outcome?: string | undefined },
+  ) {
+    requireBusiness(context, businessAccountId);
+    const where = this.#analyticsWhere(businessAccountId, options);
+    const [total, sent, handoffs, failedOrSuppressed, aggregates] = await Promise.all([
+      this.prisma.aiDecisionLog.count({ where }),
+      this.prisma.aiDecisionLog.count({ where: { ...where, outcome: 'SENT' } }),
+      this.prisma.aiDecisionLog.count({ where: { ...where, outcome: 'HANDOFF' } }),
+      this.prisma.aiDecisionLog.count({
+        where: { ...where, outcome: { in: ['FAILED', 'SUPPRESSED'] } },
+      }),
+      this.prisma.aiDecisionLog.aggregate({
+        where,
+        _avg: { totalLatencyMs: true, topRetrievalScore: true },
+        _sum: { inputTokens: true, outputTokens: true, totalTokens: true },
+      }),
+    ]);
+    const inputTokens = aggregates._sum.inputTokens ?? 0;
+    const outputTokens = aggregates._sum.outputTokens ?? 0;
+    const inputPrice = this.config.analytics.inputCostPerMillionUsd;
+    const outputPrice = this.config.analytics.outputCostPerMillionUsd;
+    return {
+      totalProcessed: total,
+      answersSent: sent,
+      handoffs,
+      failedOrSuppressed,
+      averageResponseTimeMs: aggregates._avg.totalLatencyMs ?? null,
+      averageRetrievalScore: aggregates._avg.topRetrievalScore ?? null,
+      tokens: { input: inputTokens, output: outputTokens, total: aggregates._sum.totalTokens ?? 0 },
+      estimatedCostUsd:
+        inputPrice !== undefined && outputPrice !== undefined
+          ? (inputTokens * inputPrice + outputTokens * outputPrice) / 1_000_000
+          : null,
+    };
+  }
+
+  async analyticsTraces(
+    context: MiniAppSessionContext,
+    businessAccountId: string,
+    options: {
+      from?: Date | undefined;
+      to?: Date | undefined;
+      outcome?: string | undefined;
+      page: number;
+      pageSize: number;
+    },
+  ) {
+    requireBusiness(context, businessAccountId);
+    const where = this.#analyticsWhere(businessAccountId, options);
+    const [total, traces] = await Promise.all([
+      this.prisma.aiDecisionLog.count({ where }),
+      this.prisma.aiDecisionLog.findMany({
+        where,
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+        skip: (options.page - 1) * options.pageSize,
+        take: options.pageSize,
+        select: {
+          id: true,
+          messageBatch: true,
+          decision: true,
+          answerable: true,
+          outcome: true,
+          confidence: true,
+          topRetrievalScore: true,
+          totalLatencyMs: true,
+          createdAt: true,
+        },
+      }),
+    ]);
+    return {
+      items: traces.map((trace) => ({
+        id: trace.id,
+        customerMessagePreview: this.#messagePreview(trace.messageBatch),
+        decision: trace.decision,
+        answerable: trace.answerable,
+        outcome: trace.outcome,
+        confidence: trace.confidence,
+        topRetrievalScore: trace.topRetrievalScore,
+        latencyMs: trace.totalLatencyMs,
+        createdAt: trace.createdAt,
+      })),
+      page: options.page,
+      pageSize: options.pageSize,
+      total,
+      totalPages: Math.max(1, Math.ceil(total / options.pageSize)),
+    };
+  }
+
+  async analyticsTraceDetails(
+    context: MiniAppSessionContext,
+    businessAccountId: string,
+    traceId: string,
+  ) {
+    requireBusiness(context, businessAccountId);
+    const trace = await this.prisma.aiDecisionLog.findFirst({
+      where: { id: traceId, businessAccountId },
+    });
+    if (!trace) throw new ResourceUnavailableError();
+    const raw = this.#jsonArray(trace.rawRetrievalResults);
+    const validatedIds = new Set(
+      this.#jsonArray(trace.validatedRetrievalResults).map((item) =>
+        this.#jsonString(item['chunkId']),
+      ),
+    );
+    const sentIds = new Set(
+      this.#jsonArray(trace.knowledgeSentToAi).map((item) => this.#jsonString(item['chunkId'])),
+    );
+    const citedIds = new Set(
+      (Array.isArray(trace.supportingChunkIds) ? trace.supportingChunkIds : []).map((item) =>
+        this.#jsonString(item),
+      ),
+    );
+    const canViewPromptInternals = context.admin.role !== AdminRole.SUPPORT;
+    return {
+      id: trace.id,
+      createdAt: trace.createdAt,
+      completedAt: trace.completedAt,
+      customerMessages: this.#jsonArray(trace.messageBatch),
+      conversationContext: canViewPromptInternals
+        ? this.#jsonArray(trace.conversationContext)
+        : null,
+      retrieval: {
+        raw,
+        validated: this.#jsonArray(trace.validatedRetrievalResults),
+        sentToAi: canViewPromptInternals ? this.#jsonArray(trace.knowledgeSentToAi) : null,
+        citedChunkIds: [...citedIds],
+        chunks: raw.map((item) => {
+          const chunkId = this.#jsonString(item['chunkId']);
+          return {
+            ...item,
+            validated: validatedIds.has(chunkId),
+            sentToAi: canViewPromptInternals ? sentIds.has(chunkId) : null,
+            citedByAi: citedIds.has(chunkId),
+          };
+        }),
+        latencyMs: trace.retrievalLatencyMs,
+      },
+      ai: {
+        decision: trace.decision,
+        answerable: trace.answerable,
+        confidence: trace.confidence,
+        reason: canViewPromptInternals ? trace.reason : null,
+        answer: trace.answer,
+        model: trace.model,
+        promptVersion: canViewPromptInternals ? trace.promptVersion : null,
+        tokens: {
+          input: trace.inputTokens,
+          output: trace.outputTokens,
+          total: trace.totalTokens,
+        },
+        latencyMs: trace.latencyMs,
+      },
+      outcome: {
+        status: trace.outcome,
+        reason: trace.outcomeReason,
+        errorCode: trace.errorCode,
+        totalLatencyMs: trace.totalLatencyMs,
+      },
+      permissions: { canViewPromptInternals },
+    };
+  }
+
+  #analyticsWhere(
+    businessAccountId: string,
+    options: { from?: Date | undefined; to?: Date | undefined; outcome?: string | undefined },
+  ): Prisma.AiDecisionLogWhereInput {
+    const outcomes = ['PROCESSING', 'SENT', 'HANDOFF', 'SUPPRESSED', 'WAITING', 'FAILED'] as const;
+    const outcome = outcomes.find((value) => value === options.outcome);
+    return {
+      businessAccountId,
+      ...(outcome ? { outcome } : {}),
+      ...(options.from || options.to
+        ? {
+            createdAt: {
+              ...(options.from ? { gte: options.from } : {}),
+              ...(options.to ? { lte: options.to } : {}),
+            },
+          }
+        : {}),
+    };
+  }
+
+  #jsonArray(value: Prisma.JsonValue): Record<string, unknown>[] {
+    if (!Array.isArray(value)) return [];
+    return value.filter(
+      (item): item is Prisma.JsonObject =>
+        Boolean(item) && typeof item === 'object' && !Array.isArray(item),
+    );
+  }
+
+  #messagePreview(value: Prisma.JsonValue): string {
+    return this.#jsonArray(value)
+      .map((item) => (typeof item['text'] === 'string' ? item['text'] : ''))
+      .filter(Boolean)
+      .join(' • ')
+      .slice(0, 180);
+  }
+
+  #jsonString(value: unknown): string {
+    return typeof value === 'string' ? value : '';
+  }
+
   async listHandoffs(
     context: MiniAppSessionContext,
     businessAccountId: string,

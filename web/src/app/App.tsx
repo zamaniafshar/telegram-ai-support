@@ -15,6 +15,7 @@ import {
 } from '../features/knowledge/KnowledgePages';
 import { AdminsPage, AuditPage, MorePage, NotificationsPage } from '../features/admin/AdminPages';
 import { EmptyState } from '../components/ui';
+import { AnalyticsPage, AnalyticsTracePage } from '../features/analytics/AnalyticsPages';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -64,6 +65,22 @@ export function App() {
                   <Route path="conversations" element={<LegacyConversationRedirect />} />
                   <Route path="conversations/:id" element={<LegacyConversationRedirect />} />
                   <Route path="ai-backlog" element={<AiBacklogPage />} />
+                  <Route
+                    path="analytics"
+                    element={
+                      <CapabilityRoute capability="analytics:read">
+                        <AnalyticsPage />
+                      </CapabilityRoute>
+                    }
+                  />
+                  <Route
+                    path="analytics/traces/:traceId"
+                    element={
+                      <CapabilityRoute capability="analytics:read">
+                        <AnalyticsTracePage />
+                      </CapabilityRoute>
+                    }
+                  />
                   <Route
                     path="knowledge"
                     element={

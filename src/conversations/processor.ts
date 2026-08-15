@@ -6,6 +6,7 @@ import {
   type ConversationJob,
   type Message,
   type PrismaClient,
+  AiTraceOutcome,
 } from '@prisma/client';
 import type { Logger } from 'pino';
 import type { AppConfig } from '../config/env.js';
@@ -24,6 +25,7 @@ import type {
   AiAvailabilityService,
   QueuePolicy,
 } from '../ai/availability.js';
+import { redactTraceText, traceExpiry } from '../observability/trace-safety.js';
 
 const runnable = [
   MessageProcessingStatus.PENDING,
@@ -35,6 +37,8 @@ const runnable = [
 type BatchJob = ConversationJob & { message: Message };
 
 export class ConversationProcessor {
+  private lastRetentionRunAt = 0;
+
   constructor(
     private readonly prisma: PrismaClient,
     private readonly retrieval: RetrievalService,
@@ -48,6 +52,7 @@ export class ConversationProcessor {
   ) {}
 
   async runBatch(workerId: string): Promise<number> {
+    await this.#pruneExpiredTraces();
     const now = new Date();
     const candidateQuery = {
       processAfter: { lte: now },
@@ -173,6 +178,7 @@ export class ConversationProcessor {
 
   async #processConversation(conversationId: string, workerId: string): Promise<void> {
     const now = new Date();
+    const traceStartedAt = Date.now();
     const batchId = newId();
     const jobs = await this.prisma.conversationJob.findMany({
       where: {
@@ -222,6 +228,23 @@ export class ConversationProcessor {
       },
     });
     const firstAt = firstJob.message.sentAt;
+    const currentMessageBatch = jobs.map((job) => ({
+      id: job.message.id,
+      text: job.message.text ?? '',
+      sentAt: job.message.sentAt,
+    }));
+    const batchMessageIds = new Set(jobs.map((job) => job.messageId));
+    const context = [...conversation.messages]
+      .reverse()
+      .filter(
+        (message) => !batchMessageIds.has(message.id) && message.sentAt < firstAt && message.text,
+      )
+      .map((message) => ({
+        senderType: message.senderType,
+        text: (message.text ?? '').slice(0, 2_000),
+        sentAt: message.sentAt,
+      }));
+    await this.#startTrace(firstJob, conversation.businessAccountId, currentMessageBatch, context);
     const settings = await this.availability.businessSettings(conversation.businessAccountId);
     const maxAgeMs = Math.max(1, settings.backlogMaxAgeHours) * 3_600_000;
     if (
@@ -234,6 +257,12 @@ export class ConversationProcessor {
         messageCount: jobs.length,
         reason: 'BACKLOG_OR_TELEGRAM_WINDOW_EXPIRED',
       });
+      await this.#setTraceOutcome(
+        firstJob.messageId,
+        AiTraceOutcome.SUPPRESSED,
+        'BACKLOG_EXPIRED',
+        traceStartedAt,
+      );
       return;
     }
     if (conversation.mode !== ConversationMode.AI || conversation.handoffs.length > 0) {
@@ -248,6 +277,12 @@ export class ConversationProcessor {
         conversationId,
         'AI_MESSAGE_CANCELLED_BY_HUMAN',
         { messageCount: jobs.length, reason: 'HUMAN_MODE_OR_HANDOFF' },
+      );
+      await this.#setTraceOutcome(
+        firstJob.messageId,
+        AiTraceOutcome.SUPPRESSED,
+        'HUMAN_MODE_OR_HANDOFF',
+        traceStartedAt,
       );
       return;
     }
@@ -264,6 +299,12 @@ export class ConversationProcessor {
         'AI_MESSAGE_CANCELLED_BY_HUMAN',
         { messageCount: jobs.length, reason: 'HUMAN_REPLIED' },
       );
+      await this.#setTraceOutcome(
+        firstJob.messageId,
+        AiTraceOutcome.SUPPRESSED,
+        'HUMAN_REPLIED',
+        traceStartedAt,
+      );
       return;
     }
 
@@ -273,7 +314,17 @@ export class ConversationProcessor {
       includeTelegramChecks: true,
     });
     if (!availability.available) {
-      await this.#handleUnavailable(jobs, conversation.businessAccountId, availability.reason);
+      const traceOutcome = await this.#handleUnavailable(
+        jobs,
+        conversation.businessAccountId,
+        availability.reason,
+      );
+      await this.#setTraceOutcome(
+        firstJob.messageId,
+        traceOutcome,
+        availability.reason,
+        traceStartedAt,
+      );
       return;
     }
     await this.#audit(conversation.businessAccountId, conversationId, 'AI_BACKLOG_RELEASED', {
@@ -296,14 +347,15 @@ export class ConversationProcessor {
         { businessAccountId: conversation.businessAccountId, conversationId, abuseReason },
         'automated response suppressed by customer abuse protection',
       );
+      await this.#setTraceOutcome(
+        firstJob.messageId,
+        AiTraceOutcome.SUPPRESSED,
+        abuseReason,
+        traceStartedAt,
+      );
       return;
     }
 
-    const currentMessageBatch = jobs.map((job) => ({
-      id: job.message.id,
-      text: job.message.text ?? '',
-      sentAt: job.message.sentAt,
-    }));
     const customerText = currentMessageBatch.map((item) => item.text).join('\n');
     const route = preModelRoute(customerText, {
       safeGreetingEnabled: this.config.routing.safeGreetingEnabled,
@@ -316,30 +368,31 @@ export class ConversationProcessor {
         firstJob.messageId,
       );
       await this.#finishBatch(jobs, MessageProcessingStatus.PROCESSED, batchId, null);
+      await this.#updateTrace(firstJob.messageId, {
+        decision: route.kind,
+        answerable: false,
+        reason: 'EXPLICIT_HUMAN_REQUEST',
+      });
+      await this.#setTraceOutcome(
+        firstJob.messageId,
+        AiTraceOutcome.HANDOFF,
+        'EXPLICIT_HUMAN_REQUEST',
+        traceStartedAt,
+      );
       return;
     }
 
     let answer: string | null = route.kind === 'SAFE_GREETING' ? route.answer : null;
     if (!answer) {
-      const retrieved = await this.retrieval.search(conversation.businessAccountId, customerText);
-      const batchMessageIds = new Set(jobs.map((job) => job.messageId));
-      const context = [...conversation.messages]
-        .reverse()
-        .filter(
-          (message) => !batchMessageIds.has(message.id) && message.sentAt < firstAt && message.text,
-        )
-        .map((message) => ({
-          senderType: message.senderType,
-          text: (message.text ?? '').slice(0, 2_000),
-          sentAt: message.sentAt,
-        }));
+      const retrieval = await this.#retrieveWithTrace(conversation.businessAccountId, customerText);
+      await this.#recordRetrieval(firstJob.messageId, retrieval);
       const decision = await this.answerer.decide({
         customerText,
         currentMessageBatch,
-        retrieved,
+        retrieved: retrieval.validated,
         context,
       });
-      await this.#recordDecision(firstJob, decision, retrieved);
+      await this.#recordDecision(firstJob, decision, retrieval.validated);
       if (!decision.answerable || !decision.answer) {
         await this.#activateHandoff(
           conversationId,
@@ -348,9 +401,23 @@ export class ConversationProcessor {
           firstJob.messageId,
         );
         await this.#finishBatch(jobs, MessageProcessingStatus.PROCESSED, batchId, null);
+        await this.#setTraceOutcome(
+          firstJob.messageId,
+          AiTraceOutcome.HANDOFF,
+          'AI_NOT_ANSWERABLE',
+          traceStartedAt,
+        );
         return;
       }
       answer = decision.answer;
+    } else {
+      await this.#updateTrace(firstJob.messageId, {
+        decision: route.kind,
+        answerable: true,
+        confidence: 1,
+        reason: 'SAFE_GREETING',
+        answer,
+      });
     }
 
     const finalState = await this.#finalEligibility(
@@ -375,6 +442,14 @@ export class ConversationProcessor {
       } else {
         await this.#handleUnavailable(jobs, conversation.businessAccountId, finalState);
       }
+      await this.#setTraceOutcome(
+        firstJob.messageId,
+        finalState === 'HUMAN_REPLIED' || finalState === 'HUMAN_MODE'
+          ? AiTraceOutcome.SUPPRESSED
+          : AiTraceOutcome.WAITING,
+        finalState,
+        traceStartedAt,
+      );
       return;
     }
     await this.messenger.sendAiAnswer(conversationId, answer, firstJob.messageId);
@@ -385,6 +460,7 @@ export class ConversationProcessor {
       'AI_MESSAGE_BATCH_PROCESSED',
       { messageCount: jobs.length, batchId },
     );
+    await this.#setTraceOutcome(firstJob.messageId, AiTraceOutcome.SENT, null, traceStartedAt);
   }
 
   async #reserveAutomatedResponse(
@@ -519,9 +595,9 @@ export class ConversationProcessor {
     jobs: BatchJob[],
     businessAccountId: string,
     reason: AiAvailabilityReason,
-  ): Promise<void> {
+  ): Promise<AiTraceOutcome> {
     const firstJob = jobs[0];
-    if (!firstJob) return;
+    if (!firstJob) return AiTraceOutcome.WAITING;
     const settings = await this.availability.businessSettings(businessAccountId);
     const policy: QueuePolicy =
       reason === 'MASTER_DISABLED' ? settings.manualShutdownPolicy : settings.outsideHoursPolicy;
@@ -536,7 +612,7 @@ export class ConversationProcessor {
         messageCount: jobs.length,
         reason,
       });
-      return;
+      return AiTraceOutcome.SUPPRESSED;
     }
     if (policy === 'HANDOFF') {
       await this.#activateHandoff(
@@ -551,7 +627,7 @@ export class ConversationProcessor {
         firstJob.processingBatchId ?? newId(),
         reason,
       );
-      return;
+      return AiTraceOutcome.HANDOFF;
     }
     if (policy === 'SILENT') {
       await this.#finishBatch(
@@ -564,7 +640,7 @@ export class ConversationProcessor {
         messageCount: jobs.length,
         reason,
       });
-      return;
+      return AiTraceOutcome.SUPPRESSED;
     }
     // Reconsider waiting work every poll. This is intentionally independent of the
     // previously calculated opening time so schedule/timezone edits and master-switch
@@ -597,6 +673,7 @@ export class ConversationProcessor {
       messageCount: jobs.length,
       reason,
     });
+    return AiTraceOutcome.WAITING;
   }
 
   async #finishBatch(
@@ -642,40 +719,175 @@ export class ConversationProcessor {
     decision: Awaited<ReturnType<GroundedAnswerer['decide']>>,
     retrieved: Awaited<ReturnType<RetrievalService['search']>>,
   ): Promise<void> {
-    await this.prisma.aiDecisionLog.upsert({
-      where: { messageId: job.messageId },
-      create: {
-        id: newId(),
-        conversationId: job.conversationId,
-        messageId: job.messageId,
-        answerable: decision.answerable,
-        confidence: decision.confidence,
-        reason: decision.reason,
-        answer: decision.answer,
-        supportingChunkIds: decision.supportingChunkIds,
-        retrievalResults: retrieved.map((item) => ({ chunkId: item.chunkId, score: item.score })),
-        model: decision.model,
-        promptVersion: PROMPT_VERSION,
-        latencyMs: decision.latencyMs,
-        ...(decision.inputTokens === undefined ? {} : { inputTokens: decision.inputTokens }),
-        ...(decision.outputTokens === undefined ? {} : { outputTokens: decision.outputTokens }),
-        ...(decision.totalTokens === undefined ? {} : { totalTokens: decision.totalTokens }),
-      },
-      update: {
-        answerable: decision.answerable,
-        confidence: decision.confidence,
-        reason: decision.reason,
-        answer: decision.answer,
-        supportingChunkIds: decision.supportingChunkIds,
-        retrievalResults: retrieved.map((item) => ({ chunkId: item.chunkId, score: item.score })),
-        model: decision.model,
-        latencyMs: decision.latencyMs,
-        errorCode: null,
-        ...(decision.inputTokens === undefined ? {} : { inputTokens: decision.inputTokens }),
-        ...(decision.outputTokens === undefined ? {} : { outputTokens: decision.outputTokens }),
-        ...(decision.totalTokens === undefined ? {} : { totalTokens: decision.totalTokens }),
-      },
+    await this.#updateTrace(job.messageId, {
+      answerable: decision.answerable,
+      decision:
+        decision.decision ??
+        (decision.answerable
+          ? decision.supportingChunkIds.length > 0
+            ? 'GROUNDED_ANSWER'
+            : 'SOCIAL_REPLY'
+          : 'HANDOFF'),
+      confidence: decision.confidence,
+      reason: redactTraceText(decision.reason, 2_000),
+      answer: decision.answer ? redactTraceText(decision.answer, 4_000) : null,
+      supportingChunkIds: decision.supportingChunkIds.slice(0, 20),
+      retrievalResults: retrieved.map((item) => ({ chunkId: item.chunkId, score: item.score })),
+      model: decision.model.slice(0, 100),
+      latencyMs: decision.latencyMs,
+      errorCode: null,
+      ...(decision.inputTokens === undefined ? {} : { inputTokens: decision.inputTokens }),
+      ...(decision.outputTokens === undefined ? {} : { outputTokens: decision.outputTokens }),
+      ...(decision.totalTokens === undefined ? {} : { totalTokens: decision.totalTokens }),
     });
+  }
+
+  async #startTrace(
+    job: BatchJob,
+    businessAccountId: string,
+    messageBatch: { id: string; text: string; sentAt: Date }[],
+    context: { senderType: string; text: string; sentAt: Date }[],
+  ): Promise<void> {
+    const expiresAt = traceExpiry(new Date(), this.config.analytics.retentionDays);
+    const safeBatch = messageBatch.slice(0, 20).map((message) => ({
+      id: message.id,
+      text: redactTraceText(message.text, 8_000),
+      sentAt: message.sentAt.toISOString(),
+    }));
+    const safeContext = context.slice(-30).map((message) => ({
+      senderType: message.senderType,
+      text: redactTraceText(message.text, 2_000),
+      sentAt: message.sentAt.toISOString(),
+    }));
+    try {
+      await this.prisma.aiDecisionLog.upsert({
+        where: { messageId: job.messageId },
+        create: {
+          id: newId(),
+          businessAccountId,
+          conversationId: job.conversationId,
+          messageId: job.messageId,
+          supportingChunkIds: [],
+          retrievalResults: [],
+          rawRetrievalResults: [],
+          validatedRetrievalResults: [],
+          knowledgeSentToAi: [],
+          messageBatch: safeBatch,
+          conversationContext: safeContext,
+          promptVersion: PROMPT_VERSION,
+          latencyMs: 0,
+          expiresAt,
+        },
+        update: {
+          outcome: AiTraceOutcome.PROCESSING,
+          outcomeReason: null,
+          completedAt: null,
+          errorCode: null,
+          messageBatch: safeBatch,
+          conversationContext: safeContext,
+          expiresAt,
+        },
+      });
+    } catch (error) {
+      this.logger.warn(
+        { err: error, conversationId: job.conversationId },
+        'analytics trace start failed',
+      );
+    }
+  }
+
+  async #recordRetrieval(
+    messageId: string,
+    retrieval: Awaited<ReturnType<RetrievalService['searchDetailed']>>,
+  ): Promise<void> {
+    const snapshot = retrieval.raw.slice(0, 50).map((item) => ({
+      rank: item.rank,
+      chunkId: item.chunkId.slice(0, 128),
+      knowledgeId: item.knowledgeId.slice(0, 36),
+      knowledgeVersion: item.knowledgeVersion,
+      title: redactTraceText(item.title, 200),
+      content: redactTraceText(item.content, 4_000),
+      score: item.score,
+      validated: item.validated,
+      rejectionReason: item.rejectionReason,
+    }));
+    const validated = retrieval.validated.slice(0, 20).map((item) => ({
+      rank: item.rank,
+      chunkId: item.chunkId.slice(0, 128),
+      knowledgeId: item.knowledgeId.slice(0, 36),
+      knowledgeVersion: item.knowledgeVersion,
+      title: redactTraceText(item.title, 200),
+      content: redactTraceText(item.content, 4_000),
+      score: item.score,
+      validated: true,
+      rejectionReason: null,
+    }));
+    await this.#updateTrace(messageId, {
+      rawRetrievalResults: snapshot,
+      validatedRetrievalResults: validated,
+      knowledgeSentToAi: validated.map((item) => ({
+        chunkId: item.chunkId,
+        knowledgeId: item.knowledgeId,
+        title: item.title,
+        content: item.content,
+        score: item.score,
+        rank: item.rank,
+      })),
+      topRetrievalScore: snapshot[0]?.score ?? null,
+      retrievalLatencyMs: retrieval.latencyMs,
+    });
+  }
+
+  async #retrieveWithTrace(
+    businessAccountId: string,
+    customerText: string,
+  ): Promise<Awaited<ReturnType<RetrievalService['searchDetailed']>>> {
+    if (typeof this.retrieval.searchDetailed === 'function') {
+      return this.retrieval.searchDetailed(businessAccountId, customerText);
+    }
+    // Compatibility for injected retrieval implementations that predate trace capture.
+    const started = Date.now();
+    const validated = await this.retrieval.search(businessAccountId, customerText);
+    const raw = validated.map((item, index) => ({
+      ...item,
+      rank: index + 1,
+      validated: true,
+      rejectionReason: null,
+    }));
+    return { raw, validated: raw, latencyMs: Date.now() - started };
+  }
+
+  async #updateTrace(messageId: string, data: Prisma.AiDecisionLogUpdateInput): Promise<void> {
+    try {
+      await this.prisma.aiDecisionLog.update({ where: { messageId }, data });
+    } catch (error) {
+      this.logger.warn({ err: error, messageId }, 'analytics trace update failed');
+    }
+  }
+
+  async #setTraceOutcome(
+    messageId: string,
+    outcome: AiTraceOutcome,
+    reason: string | null,
+    startedAt: number,
+  ): Promise<void> {
+    await this.#updateTrace(messageId, {
+      outcome,
+      outcomeReason: reason?.slice(0, 120) ?? null,
+      totalLatencyMs: Math.max(0, Date.now() - startedAt),
+      completedAt: outcome === AiTraceOutcome.WAITING ? null : new Date(),
+    });
+  }
+
+  async #pruneExpiredTraces(): Promise<void> {
+    const now = Date.now();
+    if (now - this.lastRetentionRunAt < 60 * 60_000) return;
+    this.lastRetentionRunAt = now;
+    try {
+      await this.prisma.aiDecisionLog.deleteMany({ where: { expiresAt: { lt: new Date(now) } } });
+    } catch (error) {
+      this.logger.warn({ err: error }, 'analytics retention cleanup failed');
+    }
   }
 
   async #activateHandoff(
@@ -725,6 +937,7 @@ export class ConversationProcessor {
     const maxAttempts = Math.min(...jobs.map((job) => job.maxAttempts));
     this.logger.error({ err: error, conversationId, attempts }, 'conversation batch failed');
     if (!shouldHandoffExternalFailure(attempts, maxAttempts)) {
+      await this.#updateTrace(firstJob.messageId, { errorCode: code });
       await this.prisma.conversationJob.updateMany({
         where: { id: { in: jobs.map((job) => job.id) } },
         data: {
@@ -750,6 +963,12 @@ export class ConversationProcessor {
       code,
       firstJob.messageId,
     ).catch(() => undefined);
+    await this.#updateTrace(firstJob.messageId, {
+      outcome: AiTraceOutcome.FAILED,
+      outcomeReason: 'EXTERNAL_SERVICE_FAILURE',
+      errorCode: code,
+      completedAt: new Date(),
+    });
     void this.notifier;
   }
 }

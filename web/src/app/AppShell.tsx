@@ -18,6 +18,9 @@ export function AppShell() {
   const location = useLocation();
   const navigation = [
     ...primary,
+    ...(hasCapability('analytics:read')
+      ? [['/analytics', '⌁', 'تحلیل پاسخ‌های هوشمند'] as const]
+      : []),
     ...(hasCapability('knowledge:manage') ? [['/knowledge', '▤', 'مدیریت دانش'] as const] : []),
     ['/connections', '⌁', 'اتصال تجاری'] as const,
     ['/system', '♡', 'سلامت سامانه'] as const,

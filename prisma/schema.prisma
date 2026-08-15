@@ -98,6 +98,15 @@ enum NotificationDeliveryStatus {
   FAILED
 }
 
+enum AiTraceOutcome {
+  PROCESSING
+  SENT
+  HANDOFF
+  SUPPRESSED
+  WAITING
+  FAILED
+}
+
 model BusinessAccount {
   id                         String                 @id @db.Char(36)
   name                       String                 @db.VarChar(200)
@@ -122,6 +131,7 @@ model BusinessAccount {
   auditLogs                  AuditLog[]
   notifications              Notification[]
   aiSettings                 BusinessAiSettings?
+  aiDecisionLogs             AiDecisionLog[]
 
   @@index([isActive])
   @@index([aiProcessingLeaseExpiresAt])
@@ -425,28 +435,46 @@ model ProcessedTelegramUpdate {
 }
 
 model AiDecisionLog {
-  id                 String       @id @db.Char(36)
-  conversationId     String       @db.Char(36)
-  messageId          String       @unique @db.Char(36)
-  answerable         Boolean
-  confidence         Float
-  reason             String       @db.Text
-  answer             String?      @db.LongText
-  supportingChunkIds Json
-  retrievalResults   Json
-  model              String       @db.VarChar(100)
-  promptVersion      String       @db.VarChar(40)
-  inputTokens        Int?
-  outputTokens       Int?
-  totalTokens        Int?
-  latencyMs          Int
-  errorCode          String?      @db.VarChar(100)
-  createdAt          DateTime     @default(now())
-  conversation       Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
-  message            Message      @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  id                        String          @id @db.Char(36)
+  businessAccountId         String          @db.Char(36)
+  conversationId            String          @db.Char(36)
+  messageId                 String          @unique @db.Char(36)
+  answerable                Boolean?
+  decision                  String?         @db.VarChar(40)
+  confidence                Float?
+  reason                    String?         @db.Text
+  answer                    String?         @db.LongText
+  supportingChunkIds        Json
+  retrievalResults          Json
+  rawRetrievalResults       Json
+  validatedRetrievalResults Json
+  knowledgeSentToAi         Json
+  messageBatch              Json
+  conversationContext       Json
+  outcome                   AiTraceOutcome  @default(PROCESSING)
+  outcomeReason             String?         @db.VarChar(120)
+  topRetrievalScore         Float?
+  retrievalLatencyMs        Int?
+  totalLatencyMs            Int?
+  model                     String?         @db.VarChar(100)
+  promptVersion             String          @db.VarChar(40)
+  inputTokens               Int?
+  outputTokens              Int?
+  totalTokens               Int?
+  latencyMs                 Int
+  errorCode                 String?         @db.VarChar(100)
+  createdAt                 DateTime        @default(now())
+  completedAt               DateTime?
+  expiresAt                 DateTime
+  businessAccount           BusinessAccount @relation(fields: [businessAccountId], references: [id], onDelete: Cascade)
+  conversation              Conversation    @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  message                   Message         @relation(fields: [messageId], references: [id], onDelete: Cascade)
 
   @@index([conversationId, createdAt])
   @@index([answerable, createdAt])
+  @@index([businessAccountId, createdAt])
+  @@index([businessAccountId, outcome, createdAt])
+  @@index([expiresAt])
 }
 
 model AuditLog {

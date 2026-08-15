@@ -30,6 +30,7 @@ export function enforceGrounding(
 
   if (decision.decision === 'HANDOFF') {
     return {
+      decision: decision.decision,
       answerable: false,
       confidence: decision.confidence,
       reason: decision.reason,
@@ -41,6 +42,7 @@ export function enforceGrounding(
   if (decision.decision === 'SOCIAL_REPLY') {
     const validSocialReply = hasAnswer && decision.supportingChunkIds.length === 0;
     return {
+      decision: decision.decision,
       answerable: validSocialReply,
       confidence: decision.confidence,
       reason: validSocialReply
@@ -53,6 +55,7 @@ export function enforceGrounding(
 
   const validGroundedAnswer = hasAnswer && decision.supportingChunkIds.length > 0 && allIdsValid;
   return {
+    decision: decision.decision,
     answerable: validGroundedAnswer,
     confidence: decision.confidence,
     reason: !allIdsValid

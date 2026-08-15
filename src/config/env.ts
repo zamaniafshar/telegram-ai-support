@@ -106,6 +106,9 @@ const envSchema = z.object({
   INDEXING_MAX_ATTEMPTS: z.coerce.number().int().min(1).max(20).default(6),
   INDEXING_BACKOFF_BASE_MS: positiveInt(5_000),
   ADMIN_NOTIFY_ADDITIONAL_MESSAGES: booleanString,
+  AI_ANALYTICS_RETENTION_DAYS: z.coerce.number().int().min(1).max(3650).default(90),
+  AI_INPUT_COST_PER_MILLION_USD: z.coerce.number().nonnegative().optional(),
+  AI_OUTPUT_COST_PER_MILLION_USD: z.coerce.number().nonnegative().optional(),
   RUN_WORKERS_IN_API: booleanString,
 
   TRUST_PROXY: booleanString,
@@ -238,6 +241,11 @@ export function loadConfig(source: NodeJS.ProcessEnv = process.env) {
       customerMessage: env.HANDOFF_CUSTOMER_MESSAGE,
       customerMessageEnabled: env.HANDOFF_CUSTOMER_MESSAGE_ENABLED,
       notifyAdditionalMessages: env.ADMIN_NOTIFY_ADDITIONAL_MESSAGES,
+    },
+    analytics: {
+      retentionDays: env.AI_ANALYTICS_RETENTION_DAYS,
+      inputCostPerMillionUsd: env.AI_INPUT_COST_PER_MILLION_USD,
+      outputCostPerMillionUsd: env.AI_OUTPUT_COST_PER_MILLION_USD,
     },
     worker: {
       pollIntervalMs: env.WORKER_POLL_INTERVAL_MS,

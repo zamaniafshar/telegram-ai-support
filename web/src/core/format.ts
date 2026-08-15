@@ -30,6 +30,14 @@ const labels: Record<string, string> = {
   Admin: 'مدیر',
   BusinessConnection: 'اتصال تجاری',
   AdminSession: 'نشست مدیریتی',
+  SENT: 'ارسال‌شده',
+  HANDOFF: 'ارجاع انسانی',
+  SUPPRESSED: 'ارسال‌نشده',
+  GROUNDED_ANSWER: 'پاسخ مستند',
+  SOCIAL_REPLY: 'پاسخ اجتماعی',
+  SAFE_GREETING: 'پاسخ خوشامدگویی',
+  KNOWLEDGE_MISSING_OR_INACTIVE: 'دانش حذف یا غیرفعال شده است',
+  VERSION_MISMATCH: 'نسخه دانش با MySQL هم‌خوان نیست',
 };
 
 export const outcomeLabels: Record<string, string> = {
@@ -65,8 +73,9 @@ export function formatDate(value?: string | null, relative = false): string {
 }
 
 export function statusTone(status: string): string {
-  if (['READY', 'RESOLVED', 'COMPLETED', 'AI', 'DELIVERED'].includes(status)) return 'success';
-  if (['FAILED', 'ERROR', 'MISSING'].includes(status)) return 'error';
+  if (['READY', 'RESOLVED', 'COMPLETED', 'AI', 'DELIVERED', 'SENT'].includes(status))
+    return 'success';
+  if (['FAILED', 'ERROR', 'MISSING', 'SUPPRESSED'].includes(status)) return 'error';
   if (
     ['WAITING', 'ACKNOWLEDGED', 'INDEXING', 'PENDING', 'HUMAN', 'RETRY', 'ATTENTION'].includes(
       status,

@@ -34,9 +34,16 @@ export function capabilities(context: MiniAppSessionContext): string[] {
     'health:read',
     'notification:read',
     'settings:read',
+    'analytics:read',
   ];
   if (context.admin.role !== AdminRole.SUPPORT) {
-    common.push('knowledge:manage', 'audit:read', 'diagnostics:read', 'settings:write');
+    common.push(
+      'knowledge:manage',
+      'audit:read',
+      'diagnostics:read',
+      'settings:write',
+      'analytics:prompt-internals',
+    );
   }
   if (context.admin.role === AdminRole.OWNER) {
     common.push('admin:manage');

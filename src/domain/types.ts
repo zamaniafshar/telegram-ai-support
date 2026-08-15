@@ -1,4 +1,5 @@
 export interface AnswerDecision {
+  decision?: 'GROUNDED_ANSWER' | 'SOCIAL_REPLY' | 'HANDOFF';
   answerable: boolean;
   confidence: number;
   reason: string;
@@ -13,6 +14,18 @@ export interface RetrievalResult {
   content: string;
   score: number;
   knowledgeVersion: number;
+}
+
+export interface RetrievalTraceResult extends RetrievalResult {
+  rank: number;
+  validated: boolean;
+  rejectionReason: 'KNOWLEDGE_MISSING_OR_INACTIVE' | 'VERSION_MISMATCH' | null;
+}
+
+export interface DetailedRetrieval {
+  raw: RetrievalTraceResult[];
+  validated: RetrievalTraceResult[];
+  latencyMs: number;
 }
 
 export interface ConversationContextMessage {

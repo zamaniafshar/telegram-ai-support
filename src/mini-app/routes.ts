@@ -17,6 +17,12 @@ const idSchema = z.string().min(1).max(128);
 const businessParams = z.object({ businessId: idSchema });
 const entityParams = businessParams.extend({ id: idSchema });
 const conversationParams = businessParams.extend({ conversationId: idSchema });
+const analyticsTraceParams = businessParams.extend({ traceId: idSchema });
+const analyticsFilters = z.object({
+  from: z.coerce.date().optional(),
+  to: z.coerce.date().optional(),
+  outcome: z.string().max(32).optional(),
+});
 const scheduleIntervalSchema = z
   .object({
     start: z.string().regex(/^(?:[01]\d|2[0-3]):[0-5]\d$/),
@@ -160,6 +166,31 @@ function registerMiniAppRoutes(
     const context = await auth.requireSession(request);
     const { businessId } = businessParams.parse(request.params);
     return data(await management.dashboard(context, businessId));
+  });
+
+  app.get('/api/v1/businesses/:businessId/analytics/overview', async (request) => {
+    const context = await auth.requireSession(request);
+    const { businessId } = businessParams.parse(request.params);
+    const query = analyticsFilters.parse(request.query);
+    return data(await management.analyticsOverview(context, businessId, query));
+  });
+
+  app.get('/api/v1/businesses/:businessId/analytics/traces', async (request) => {
+    const context = await auth.requireSession(request);
+    const { businessId } = businessParams.parse(request.params);
+    const query = analyticsFilters
+      .extend({
+        page: z.coerce.number().int().min(1).default(1),
+        pageSize: z.coerce.number().int().min(1).max(50).default(20),
+      })
+      .parse(request.query);
+    return data(await management.analyticsTraces(context, businessId, query));
+  });
+
+  app.get('/api/v1/businesses/:businessId/analytics/traces/:traceId', async (request) => {
+    const context = await auth.requireSession(request);
+    const { businessId, traceId } = analyticsTraceParams.parse(request.params);
+    return data(await management.analyticsTraceDetails(context, businessId, traceId));
   });
 
   app.get('/api/v1/businesses/:businessId/handoffs', async (request) => {
