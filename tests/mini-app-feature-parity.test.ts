@@ -70,7 +70,7 @@ describe('Mini App management feature parity', () => {
     ['/knowledge/drafts', 'create-draft'],
     ['/active', 'toggle-knowledge'],
     ['/indexing/retry', 'retry-knowledge'],
-    ['confirmTitle', 'delete-knowledge'],
+    ["method: 'DELETE'", 'delete-knowledge'],
     ["path: '/admins'", 'add-admin'],
     ["method: 'PATCH'", 'change-admin-role'],
     ['/access', 'remove-admin'],

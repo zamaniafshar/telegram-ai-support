@@ -168,16 +168,11 @@ export function KnowledgeDetailPage() {
   };
   const remove = () => {
     if (!item) return;
-    const confirmation = window.prompt(`برای حذف، عنوان «${item.title}» را وارد کنید:`);
-    if (confirmation !== item.title) {
-      if (confirmation !== null) toast('عنوان واردشده یکسان نیست.', 'error');
-      return;
-    }
+    if (!window.confirm(`دانش «${item.title}» حذف شود؟`)) return;
     mutate.mutate(
       {
         path: `/knowledge/${encodeURIComponent(item.id)}`,
         method: 'DELETE',
-        body: { confirmTitle: item.title },
       },
       {
         onSuccess: () => {

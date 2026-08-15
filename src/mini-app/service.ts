@@ -1331,15 +1331,9 @@ export class MiniAppManagementService {
     context: MiniAppSessionContext,
     businessAccountId: string,
     knowledgeId: string,
-    confirmTitle: string,
   ): Promise<void> {
     requireRole(context, AdminRole.ADMIN);
     requireBusiness(context, businessAccountId);
-    const item = await this.knowledge.get(businessAccountId, knowledgeId);
-    if (!item) throw new ResourceUnavailableError();
-    if (item.title !== confirmTitle) {
-      throw new ValidationError('Confirmation title does not match', 'CONFIRMATION_MISMATCH');
-    }
     await this.knowledge.delete(businessAccountId, knowledgeId, context.admin.id);
   }
 
