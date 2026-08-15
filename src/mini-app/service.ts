@@ -1331,10 +1331,10 @@ export class MiniAppManagementService {
     context: MiniAppSessionContext,
     businessAccountId: string,
     knowledgeId: string,
-  ): Promise<void> {
+  ) {
     requireRole(context, AdminRole.ADMIN);
     requireBusiness(context, businessAccountId);
-    await this.knowledge.delete(businessAccountId, knowledgeId, context.admin.id);
+    return this.knowledge.delete(businessAccountId, knowledgeId, context.admin.id);
   }
 
   async retryKnowledge(

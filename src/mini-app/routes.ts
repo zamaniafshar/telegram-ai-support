@@ -340,8 +340,8 @@ function registerMiniAppRoutes(
   app.delete('/api/v1/businesses/:businessId/knowledge/:id', async (request) => {
     const context = await mutationContext(request, auth);
     const { businessId, id } = entityParams.parse(request.params);
-    await management.deleteKnowledge(context, businessId, id);
-    return data({ ok: true });
+    const deletion = await management.deleteKnowledge(context, businessId, id);
+    return data({ ok: true, ...deletion });
   });
 
   app.get('/api/v1/businesses/:businessId/connections', async (request) => {

@@ -24,8 +24,14 @@ function knowledgePrisma() {
     knowledgeItem: {
       create: vi.fn().mockResolvedValue(baseItem),
       update: vi.fn().mockResolvedValue({ ...baseItem, version: 2 }),
+      updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      findFirst: vi.fn().mockResolvedValue({ ...baseItem, version: 2, deletedAt: new Date() }),
     },
-    indexingJob: { create: vi.fn().mockResolvedValue({}), update: vi.fn() },
+    indexingJob: {
+      create: vi.fn().mockResolvedValue({ id: 'remove-job-1', status: 'PENDING' }),
+      update: vi.fn().mockResolvedValue({ id: 'existing-remove-job', status: 'PENDING' }),
+      findUnique: vi.fn().mockResolvedValue(null),
+    },
     knowledgeChunk: { updateMany: vi.fn().mockResolvedValue({ count: 1 }) },
     auditLog: { create: vi.fn().mockResolvedValue({}) },
   };
@@ -79,11 +85,58 @@ describe('knowledge CRUD durability', () => {
     const { prisma, tx } = knowledgePrisma();
     const service = new KnowledgeService(prisma as never, testConfig());
     await service.delete('business-1', 'knowledge-1', 'admin-1');
-    expect(tx.knowledgeItem.update).toHaveBeenCalledWith(
-      expect.objectContaining({ data: expect.objectContaining({ isActive: false }) }),
+    expect(tx.knowledgeItem.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ deletedAt: null }),
+        data: expect.objectContaining({ isActive: false }),
+      }),
     );
     expect(tx.indexingJob.create).toHaveBeenCalledWith(
       expect.objectContaining({ data: expect.objectContaining({ action: 'REMOVE' }) }),
+    );
+  });
+
+  it('reuses the cleanup job when a duplicate delete request arrives', async () => {
+    const { prisma, tx } = knowledgePrisma();
+    tx.knowledgeItem.updateMany.mockResolvedValue({ count: 0 });
+    tx.indexingJob.findUnique.mockResolvedValue({
+      id: 'existing-remove-job',
+      status: 'PENDING',
+    });
+    const service = new KnowledgeService(prisma as never, testConfig());
+
+    await expect(service.delete('business-1', 'knowledge-1', 'admin-1')).resolves.toEqual({
+      cleanupJobId: 'existing-remove-job',
+      cleanupStatus: 'PENDING',
+      alreadyDeleted: true,
+    });
+    expect(tx.indexingJob.create).not.toHaveBeenCalled();
+    expect(tx.auditLog.create).not.toHaveBeenCalled();
+  });
+
+  it('requeues a failed Qdrant cleanup job on a repeated delete', async () => {
+    const { prisma, tx } = knowledgePrisma();
+    tx.knowledgeItem.updateMany.mockResolvedValue({ count: 0 });
+    tx.indexingJob.findUnique.mockResolvedValue({
+      id: 'existing-remove-job',
+      status: 'FAILED',
+    });
+    const service = new KnowledgeService(prisma as never, testConfig());
+
+    await expect(service.delete('business-1', 'knowledge-1', 'admin-1')).resolves.toMatchObject({
+      cleanupJobId: 'existing-remove-job',
+      cleanupStatus: 'PENDING',
+      alreadyDeleted: true,
+    });
+    expect(tx.indexingJob.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ status: 'PENDING', attempts: 0 }),
+      }),
+    );
+    expect(tx.knowledgeItem.updateMany).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ indexingStatus: 'PENDING', indexingError: null }),
+      }),
     );
   });
 

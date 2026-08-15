@@ -1,4 +1,4 @@
-import type { ButtonHTMLAttributes, FormEvent, ReactNode } from 'react';
+import { type ButtonHTMLAttributes, type FormEvent, type ReactNode, useEffect, useId } from 'react';
 import { ApiError } from '../core/api';
 import { faLabel, statusTone } from '../core/format';
 
@@ -159,23 +159,42 @@ export function Dialog({
   description,
   children,
   onClose,
+  placement = 'bottom',
 }: {
   title: string;
   description: string;
   children: ReactNode;
   onClose: () => void;
+  placement?: 'top' | 'bottom';
 }) {
+  const titleId = useId();
+  const descriptionId = useId();
+
+  useEffect(() => {
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', closeOnEscape);
+    return () => window.removeEventListener('keydown', closeOnEscape);
+  }, [onClose]);
+
   return (
     <div
-      className="sheet-backdrop"
+      className={`sheet-backdrop ${placement === 'top' ? 'sheet-backdrop-top' : ''}`}
       role="presentation"
       onMouseDown={(event) => {
         if (event.currentTarget === event.target) onClose();
       }}
     >
-      <section className="sheet" role="dialog" aria-modal="true" aria-labelledby="dialog-title">
-        <h3 id="dialog-title">{title}</h3>
-        <p>{description}</p>
+      <section
+        className={`sheet ${placement === 'top' ? 'sheet-top' : ''}`}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        aria-describedby={descriptionId}
+      >
+        <h3 id={titleId}>{title}</h3>
+        <p id={descriptionId}>{description}</p>
         {children}
       </section>
     </div>

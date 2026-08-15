@@ -5,12 +5,12 @@ import { indexingFailureState } from '../src/indexing/retry-policy.js';
 import { AppError } from '../src/utils/errors.js';
 import { silentLogger, testConfig } from './helpers.js';
 
-function indexingHarness(failUpsert = false) {
+function indexingHarness(failUpsert = false, action: IndexingAction = IndexingAction.UPSERT) {
   const job = {
     id: 'job-1',
     knowledgeItemId: 'knowledge-1',
     knowledgeVersion: 2,
-    action: IndexingAction.UPSERT,
+    action,
     status: IndexingJobStatus.PROCESSING,
     dedupeKey: 'dedupe',
     attempts: 1,
@@ -29,11 +29,11 @@ function indexingHarness(failUpsert = false) {
     businessAccountId: 'business-1',
     title: 'Approved title',
     description: 'First approved paragraph.\n\nSecond approved paragraph.',
-    isActive: true,
+    isActive: action === IndexingAction.UPSERT,
     version: 2,
     indexingStatus: IndexingStatus.PENDING,
     indexingError: null,
-    deletedAt: null,
+    deletedAt: action === IndexingAction.REMOVE ? new Date() : null,
     createdAt: new Date(),
     updatedAt: new Date(),
     createdByAdminId: 'admin',
@@ -42,6 +42,7 @@ function indexingHarness(failUpsert = false) {
   const tx = {
     knowledgeChunk: {
       deleteMany: vi.fn().mockResolvedValue({ count: 1 }),
+      updateMany: vi.fn().mockResolvedValue({ count: 1 }),
       upsert: vi.fn().mockResolvedValue({}),
     },
     knowledgeItem: {
@@ -124,6 +125,26 @@ describe('Qdrant indexing and replacement', () => {
     expect(harness.prisma.indexingJob.update).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({ status: IndexingJobStatus.RETRY }),
+      }),
+    );
+  });
+
+  it('removes deleted knowledge from Qdrant and completes its queued job', async () => {
+    const harness = indexingHarness(false, IndexingAction.REMOVE);
+    const service = new IndexingService(
+      harness.prisma as never,
+      harness.embeddings,
+      harness.vectors as never,
+      testConfig(),
+      silentLogger,
+    );
+
+    expect(await service.runBatch('worker')).toBe(1);
+    expect(harness.vectors.removeKnowledge).toHaveBeenCalledWith('knowledge-1');
+    expect(harness.vectors.upsert).not.toHaveBeenCalled();
+    expect(harness.prisma.indexingJob.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ status: IndexingJobStatus.COMPLETED }),
       }),
     );
   });

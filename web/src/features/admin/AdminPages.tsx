@@ -10,6 +10,7 @@ import type { AdminAccount } from '../../core/types';
 import { Badge, Button, Dialog, EmptyState, PageHeader, QueryState } from '../../components/ui';
 import { useSession } from '../../app/SessionProvider';
 import { useToast } from '../../app/ToastProvider';
+import { useConfirmation } from '../../app/ConfirmationProvider';
 
 const adminSchema = z.object({
   displayName: z.string().max(200),
@@ -21,6 +22,7 @@ type AdminForm = z.infer<typeof adminSchema>;
 export function AdminsPage() {
   const { businessPath } = useSession();
   const toast = useToast();
+  const confirm = useConfirmation();
   const client = useQueryClient();
   const [open, setOpen] = useState(false);
   const form = useForm<AdminForm>({
@@ -46,8 +48,18 @@ export function AdminsPage() {
     },
     onError: (error) => toast(error.message, 'error'),
   });
-  const confirmMutation = (message: string, input: Parameters<typeof mutation.mutate>[0]) => {
-    if (window.confirm(message)) mutation.mutate(input);
+  const confirmMutation = async (
+    message: string,
+    input: Parameters<typeof mutation.mutate>[0],
+    destructive = false,
+  ) => {
+    const confirmed = await confirm({
+      title: destructive ? 'حذف دسترسی' : 'تغییر دسترسی',
+      message,
+      confirmLabel: destructive ? 'حذف' : 'تأیید تغییر',
+      tone: destructive ? 'danger' : 'primary',
+    });
+    if (confirmed) mutation.mutate(input);
   };
   return (
     <>
@@ -84,7 +96,7 @@ export function AdminsPage() {
                 <div className="button-row">
                   <Button
                     onClick={() =>
-                      confirmMutation(
+                      void confirmMutation(
                         `نقش این حساب به «${faLabel(item.role === 'ADMIN' ? 'SUPPORT' : 'ADMIN')}» تغییر کند؟`,
                         {
                           path: `/admins/${item.id}`,
@@ -98,7 +110,7 @@ export function AdminsPage() {
                   </Button>
                   <Button
                     onClick={() =>
-                      confirmMutation('وضعیت دسترسی این حساب تغییر کند؟', {
+                      void confirmMutation('وضعیت دسترسی این حساب تغییر کند؟', {
                         path: `/admins/${item.id}`,
                         method: 'PATCH',
                         body: { isActive: !item.isActive },
@@ -110,10 +122,14 @@ export function AdminsPage() {
                   <Button
                     variant="danger"
                     onClick={() =>
-                      confirmMutation('دسترسی این حساب از کسب‌وکار حذف شود؟', {
-                        path: `/admins/${item.id}/access`,
-                        method: 'DELETE',
-                      })
+                      void confirmMutation(
+                        'دسترسی این حساب از کسب‌وکار حذف شود؟',
+                        {
+                          path: `/admins/${item.id}/access`,
+                          method: 'DELETE',
+                        },
+                        true,
+                      )
                     }
                   >
                     حذف دسترسی

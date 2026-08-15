@@ -5,6 +5,7 @@ import { z } from 'zod';
 import { request, jsonBody } from '../../core/api';
 import { faLabel, formatDate, outcomeLabels } from '../../core/format';
 import type { HandoffDetail, HandoffSummary, Message } from '../../core/types';
+import { useConfirmation } from '../../app/ConfirmationProvider';
 
 interface ChatSummary extends Omit<HandoffSummary, 'expiresAt'> {
   updatedAt: string;
@@ -291,6 +292,7 @@ export function HandoffsPage() {
 const resolutionSchema = z.object({ outcome: z.string().min(1), note: z.string().max(2000) });
 
 export function HandoffDetailPage() {
+  const confirm = useConfirmation();
   const { conversationId = '' } = useParams();
   const { businessPath } = useSession();
   const toast = useToast();
@@ -314,8 +316,9 @@ export function HandoffDetailPage() {
     },
   });
   const detail = query.data;
-  const act = (name: string, confirm?: string) => {
-    if (!confirm || window.confirm(confirm)) action.mutate({ name });
+  const act = async (name: string, confirmationMessage?: string) => {
+    if (confirmationMessage && !(await confirm(confirmationMessage))) return;
+    action.mutate({ name });
   };
   const openChat = () => {
     const username = detail?.customer.username;
@@ -344,15 +347,15 @@ export function HandoffDetailPage() {
               <Card>
                 <div className="button-row">
                   {detail.capabilities.canClaim && (
-                    <Button variant="primary" onClick={() => act('claim')}>
+                    <Button variant="primary" onClick={() => void act('claim')}>
                       پذیرفتن ارجاع
                     </Button>
                   )}
                   {detail.capabilities.canAcknowledge && (
-                    <Button onClick={() => act('acknowledge')}>مشاهده شد</Button>
+                    <Button onClick={() => void act('acknowledge')}>مشاهده شد</Button>
                   )}
                   {detail.capabilities.canExtend && (
-                    <Button onClick={() => act('extend', 'حالت انسانی از اکنون تمدید شود؟')}>
+                    <Button onClick={() => void act('extend', 'حالت انسانی از اکنون تمدید شود؟')}>
                       تمدید حالت انسانی
                     </Button>
                   )}
@@ -362,7 +365,7 @@ export function HandoffDetailPage() {
                     </Button>
                   )}
                   {detail.capabilities.canEnableAi && (
-                    <Button onClick={() => act('enable-ai', 'پاسخ‌گویی هوشمند فعال شود؟')}>
+                    <Button onClick={() => void act('enable-ai', 'پاسخ‌گویی هوشمند فعال شود؟')}>
                       فعال‌سازی پاسخ‌گویی هوشمند
                     </Button>
                   )}

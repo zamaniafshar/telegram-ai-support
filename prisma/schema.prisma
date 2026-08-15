@@ -457,7 +457,7 @@ model AiDecisionLog {
   retrievalLatencyMs        Int?
   totalLatencyMs            Int?
   model                     String?         @db.VarChar(100)
-  promptVersion             String          @db.VarChar(40)
+  promptVersion             String          @db.VarChar(100)
   inputTokens               Int?
   outputTokens              Int?
   totalTokens               Int?

@@ -12,6 +12,7 @@ import {
   Badge,
   Button,
   Card,
+  Dialog,
   EmptyState,
   KeyValue,
   PageHeader,
@@ -20,6 +21,7 @@ import {
 } from '../../components/ui';
 import { useSession } from '../../app/SessionProvider';
 import { useToast } from '../../app/ToastProvider';
+import { useConfirmation } from '../../app/ConfirmationProvider';
 
 interface KnowledgeList {
   published: KnowledgeItem[];
@@ -34,6 +36,12 @@ interface KnowledgeDetail {
 interface PreviewChunk {
   index: number;
   content: string;
+}
+
+interface KnowledgeDeletion {
+  ok: boolean;
+  cleanupStatus: 'PENDING' | 'PROCESSING' | 'COMPLETED' | 'RETRY';
+  cleanupJobId: string;
 }
 
 export function KnowledgePage() {
@@ -140,6 +148,7 @@ export function KnowledgeDetailPage() {
   const navigate = useNavigate();
   const toast = useToast();
   const client = useQueryClient();
+  const [deleteOpen, setDeleteOpen] = useState(false);
   const queryKey = ['knowledge-detail', businessPath(''), id];
   const query = useQuery({
     queryKey,
@@ -151,6 +160,23 @@ export function KnowledgeDetailPage() {
         method,
         ...(body === undefined ? {} : { body: jsonBody(body) }),
       }),
+    onError: (error) => toast(error.message, 'error'),
+  });
+  const deleteMutation = useMutation({
+    mutationFn: () =>
+      request<KnowledgeDeletion>(businessPath(`/knowledge/${encodeURIComponent(id)}`), {
+        method: 'DELETE',
+      }),
+    onSuccess: async (deletion) => {
+      setDeleteOpen(false);
+      await client.invalidateQueries({ queryKey: ['knowledge'] });
+      toast(
+        deletion.cleanupStatus === 'COMPLETED'
+          ? 'دانش و داده‌های Qdrant حذف شدند.'
+          : 'دانش حذف شد؛ پاک‌سازی Qdrant در صف پردازش قرار گرفت.',
+      );
+      await navigate('/knowledge', { replace: true });
+    },
     onError: (error) => toast(error.message, 'error'),
   });
   const refresh = async (message: string) => {
@@ -167,20 +193,8 @@ export function KnowledgeDetailPage() {
     await navigate(`/knowledge/drafts/${draft.id}`);
   };
   const remove = () => {
-    if (!item) return;
-    if (!window.confirm(`دانش «${item.title}» حذف شود؟`)) return;
-    mutate.mutate(
-      {
-        path: `/knowledge/${encodeURIComponent(item.id)}`,
-        method: 'DELETE',
-      },
-      {
-        onSuccess: () => {
-          toast('دانش حذف و از بازیابی خارج شد.');
-          void navigate('/knowledge', { replace: true });
-        },
-      },
-    );
+    if (!item || deleteMutation.isPending) return;
+    setDeleteOpen(true);
   };
   return (
     <QueryState pending={query.isPending} error={query.error}>
@@ -254,8 +268,8 @@ export function KnowledgeDetailPage() {
                       تلاش دوباره
                     </Button>
                   )}
-                  <Button variant="danger" onClick={remove}>
-                    حذف دانش
+                  <Button variant="danger" onClick={remove} disabled={deleteMutation.isPending}>
+                    {deleteMutation.isPending ? 'در حال حذف…' : 'حذف دانش'}
                   </Button>
                 </div>
               </Card>
@@ -270,6 +284,37 @@ export function KnowledgeDetailPage() {
               </Card>
             </aside>
           </div>
+          {deleteOpen && (
+            <Dialog
+              title="حذف دانش"
+              description={`دانش «${item.title}» حذف شود؟ پس از تأیید، فوراً از پاسخ‌گویی خارج و پاک‌سازی آن از Qdrant در صف قرار می‌گیرد.`}
+              placement="top"
+              onClose={() => {
+                if (!deleteMutation.isPending) setDeleteOpen(false);
+              }}
+            >
+              <div className="button-row" aria-busy={deleteMutation.isPending}>
+                <Button
+                  type="button"
+                  onClick={() => setDeleteOpen(false)}
+                  disabled={deleteMutation.isPending}
+                >
+                  لغو
+                </Button>
+                <Button
+                  type="button"
+                  variant="danger"
+                  onClick={() => deleteMutation.mutate()}
+                  disabled={deleteMutation.isPending}
+                >
+                  {deleteMutation.isPending && (
+                    <span className="button-spinner" aria-hidden="true" />
+                  )}
+                  {deleteMutation.isPending ? 'در حال حذف و ثبت در صف…' : 'تأیید حذف'}
+                </Button>
+              </div>
+            </Dialog>
+          )}
         </>
       )}
     </QueryState>
@@ -283,6 +328,7 @@ const draftSchema = z.object({
 type DraftForm = z.infer<typeof draftSchema>;
 
 export function DraftEditorPage() {
+  const confirm = useConfirmation();
   const { id = '' } = useParams();
   const { businessPath } = useSession();
   const navigate = useNavigate();
@@ -350,7 +396,13 @@ export function DraftEditorPage() {
   const publish = useCallback(async () => {
     try {
       const current = dirty ? await save() : draft;
-      if (!current || !window.confirm('این دانش منتشر و برای پردازش در صف قرار گیرد؟')) return;
+      if (!current) return;
+      const confirmed = await confirm({
+        title: 'انتشار دانش',
+        message: 'این دانش منتشر و برای پردازش در صف قرار گیرد؟',
+        confirmLabel: 'انتشار',
+      });
+      if (!confirmed) return;
       const item = await request<KnowledgeItem>(
         businessPath(`/knowledge/drafts/${encodeURIComponent(id)}/publish`),
         { method: 'POST', body: jsonBody({ revision: current.revision }) },
@@ -360,7 +412,7 @@ export function DraftEditorPage() {
     } catch (error) {
       toast(error instanceof Error ? error.message : 'انتشار انجام نشد.', 'error');
     }
-  }, [businessPath, dirty, draft, id, navigate, save, toast]);
+  }, [businessPath, confirm, dirty, draft, id, navigate, save, toast]);
   useTelegramMainButton('انتشار دانش', () => void publish(), Boolean(draft));
   return (
     <QueryState pending={query.isPending} error={query.error}>

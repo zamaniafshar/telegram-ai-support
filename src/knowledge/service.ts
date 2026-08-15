@@ -170,44 +170,89 @@ export class KnowledgeService {
     });
   }
 
-  async delete(businessAccountId: string, id: string, adminId: string): Promise<void> {
-    const current = await this.requireActiveRecord(businessAccountId, id);
-    await this.prisma.$transaction(async (tx) => {
-      const item = await tx.knowledgeItem.update({
-        where: { id },
+  async delete(
+    businessAccountId: string,
+    id: string,
+    adminId: string,
+  ): Promise<{
+    cleanupJobId: string;
+    cleanupStatus: IndexingJobStatus;
+    alreadyDeleted: boolean;
+  }> {
+    return this.prisma.$transaction(async (tx) => {
+      const changed = await tx.knowledgeItem.updateMany({
+        where: { id, businessAccountId, deletedAt: null },
         data: {
           deletedAt: new Date(),
           isActive: false,
           version: { increment: 1 },
           updatedByAdminId: adminId,
           indexingStatus: IndexingStatus.PENDING,
+          indexingError: null,
         },
       });
+      const item = await tx.knowledgeItem.findFirst({ where: { id, businessAccountId } });
+      if (!item) throw new ValidationError('Knowledge item not found', 'KNOWLEDGE_NOT_FOUND');
+
       await tx.knowledgeChunk.updateMany({
         where: { knowledgeItemId: id },
         data: { isActive: false },
       });
-      await tx.indexingJob.create({
-        data: {
-          id: newId(),
-          knowledgeItemId: id,
-          knowledgeVersion: item.version,
-          action: IndexingAction.REMOVE,
-          dedupeKey: `${id}:${item.version}:REMOVE`,
-          maxAttempts: this.config.worker.indexingMaxAttempts,
-        },
-      });
-      await tx.auditLog.create({
-        data: {
-          id: newId(),
-          businessAccountId: current.businessAccountId,
-          actorType: 'ADMIN',
-          actorId: adminId,
-          action: 'KNOWLEDGE_DELETED',
-          entityType: 'KnowledgeItem',
-          entityId: id,
-        },
-      });
+
+      const dedupeKey = `${id}:${item.version}:REMOVE`;
+      const existingJob = await tx.indexingJob.findUnique({ where: { dedupeKey } });
+      let cleanupJob =
+        existingJob ??
+        (await tx.indexingJob.create({
+          data: {
+            id: newId(),
+            knowledgeItemId: id,
+            knowledgeVersion: item.version,
+            action: IndexingAction.REMOVE,
+            dedupeKey,
+            maxAttempts: this.config.worker.indexingMaxAttempts,
+          },
+        }));
+
+      if (cleanupJob.status === IndexingJobStatus.FAILED) {
+        cleanupJob = await tx.indexingJob.update({
+          where: { id: cleanupJob.id },
+          data: {
+            status: IndexingJobStatus.PENDING,
+            attempts: 0,
+            availableAt: new Date(),
+            leaseOwner: null,
+            leaseExpiresAt: null,
+            lastErrorCode: null,
+            lastErrorDetail: null,
+            completedAt: null,
+          },
+        });
+        await tx.knowledgeItem.updateMany({
+          where: { id, businessAccountId },
+          data: { indexingStatus: IndexingStatus.PENDING, indexingError: null },
+        });
+      }
+
+      if (changed.count === 1) {
+        await tx.auditLog.create({
+          data: {
+            id: newId(),
+            businessAccountId: item.businessAccountId,
+            actorType: 'ADMIN',
+            actorId: adminId,
+            action: 'KNOWLEDGE_DELETED',
+            entityType: 'KnowledgeItem',
+            entityId: id,
+            metadata: { cleanupJobId: cleanupJob.id },
+          },
+        });
+      }
+      return {
+        cleanupJobId: cleanupJob.id,
+        cleanupStatus: cleanupJob.status,
+        alreadyDeleted: changed.count === 0,
+      };
     });
   }
 

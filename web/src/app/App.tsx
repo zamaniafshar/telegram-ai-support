@@ -16,6 +16,7 @@ import {
 import { AdminsPage, AuditPage, MorePage, NotificationsPage } from '../features/admin/AdminPages';
 import { EmptyState } from '../components/ui';
 import { AnalyticsPage, AnalyticsTracePage } from '../features/analytics/AnalyticsPages';
+import { ConfirmationProvider } from './ConfirmationProvider';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -57,7 +58,13 @@ export function App() {
           <ToastProvider>
             <SessionProvider>
               <Routes>
-                <Route element={<AppShell />}>
+                <Route
+                  element={
+                    <ConfirmationProvider>
+                      <AppShell />
+                    </ConfirmationProvider>
+                  }
+                >
                   <Route index element={<Navigate to="/overview" replace />} />
                   <Route path="overview" element={<OverviewPage />} />
                   <Route path="handoffs" element={<HandoffsPage />} />
