@@ -37,8 +37,16 @@ export class QdrantVectorStore implements VectorStore {
   readonly client: QdrantClient;
 
   constructor(private readonly config: AppConfig) {
+    const qdrantUrl = new URL(config.qdrant.url);
+    const port = qdrantUrl.port
+      ? Number(qdrantUrl.port)
+      : qdrantUrl.protocol === 'https:'
+        ? 443
+        : 6333;
+
     this.client = new QdrantClient({
       url: config.qdrant.url,
+      port,
       ...(config.qdrant.apiKey ? { apiKey: config.qdrant.apiKey } : {}),
       timeout: config.qdrant.timeoutMs,
       checkCompatibility: false,
