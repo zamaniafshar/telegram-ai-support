@@ -5,6 +5,7 @@ import type { Logger } from 'pino';
 import type { AppConfig } from '../config/env.js';
 import { millisecondsFrom } from '../utils/time.js';
 import type { HostResourceNotifier } from '../telegram-admin/notifier.js';
+export type { HostResourceNotifier };
 
 const STATE_ID = 'host_resource';
 const MONITOR_LEASE_MS = 60 * 1_000;

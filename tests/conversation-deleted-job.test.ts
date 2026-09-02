@@ -92,14 +92,17 @@ describe('Deleted and Empty Message Handling (Issue 2)', () => {
       silentLogger,
     );
 
-    await ingestor.ingest({
-      update_id: 12345,
-      deleted_business_messages: {
-        business_connection_id: 'conn-1',
-        chat: { id: 98765, type: 'private' },
-        message_ids: [100],
+    await ingestor.ingest(
+      {
+        update_id: 12345,
+        deleted_business_messages: {
+          business_connection_id: 'conn-1',
+          chat: { id: 98765, type: 'private' },
+          message_ids: [100],
+        },
       },
-    });
+      'req-test-1',
+    );
 
     // Verify conversationJob.updateMany was called to cancel pending jobs
     expect(mockPrisma.conversationJob.updateMany).toHaveBeenCalledWith({

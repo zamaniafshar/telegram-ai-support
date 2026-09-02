@@ -307,6 +307,7 @@ export function NotificationsPage() {
 }
 
 const descriptions: Record<string, string> = {
+  '/analytics': 'بررسی کیفیت و ردیابی پاسخ‌های AI',
   '/knowledge': 'محتوای پاسخ‌گویی',
   '/connections': 'ارتباط حساب پشتیبانی',
   '/system': 'سرویس‌ها و صف‌ها',
@@ -318,6 +319,7 @@ const descriptions: Record<string, string> = {
 export function MorePage() {
   const { hasCapability } = useSession();
   const links = [
+    ...(hasCapability('analytics:read') ? [['/analytics', '⌁', 'تحلیل پاسخ‌های هوشمند']] : []),
     ...(hasCapability('knowledge:manage') ? [['/knowledge', '▤', 'مدیریت دانش']] : []),
     ['/connections', '⌁', 'اتصال تجاری'],
     ['/system', '♡', 'سلامت سامانه'],
@@ -328,7 +330,7 @@ export function MorePage() {
   ];
   return (
     <>
-      <PageHeader title="بیشتر" subtitle="مدیریت دانش، سلامت و دسترسی‌ها" />
+      <PageHeader title="بیشتر" subtitle="تحلیل‌ها، مدیریت دانش، سلامت و دسترسی‌ها" />
       <div className="more-grid">
         {links.map(([path, icon, label]) => (
           <Link className="more-link" to={path} key={path}>
