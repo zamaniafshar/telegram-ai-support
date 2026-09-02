@@ -18,6 +18,7 @@ import { BusinessUpdateIngestor } from './telegram-business/ingest.js';
 import { AdminBotHandler } from './telegram-admin/handler.js';
 import { WorkerRunner } from './workers/runner.js';
 import { NanoGptBalanceClient, NanoGptCreditMonitor } from './ai/nanogpt-credit.js';
+import { HostResourceMonitor } from './observability/host-monitor.js';
 import { MiniAppAuthService } from './mini-app/auth.js';
 import { MiniAppManagementService } from './mini-app/service.js';
 import { AiAvailabilityService } from './ai/availability.js';
@@ -35,6 +36,7 @@ export function createServices(config: AppConfig, logger: Logger, prisma?: Prism
     config,
     logger,
   );
+  const hostMonitor = new HostResourceMonitor(database, notifier, config, logger);
   const openai = new OpenAiAdapter(config, nanoGptCredit);
   const vectors = new QdrantVectorStore(config);
   const retrieval = new RetrievalService(database, openai, vectors, config);
@@ -65,6 +67,7 @@ export function createServices(config: AppConfig, logger: Logger, prisma?: Prism
     config,
     aiAvailability,
     notifier,
+    hostMonitor,
   );
   const businessIngestor = new BusinessUpdateIngestor(database, businessTelegram, config, logger);
   const adminHandler = new AdminBotHandler(
@@ -78,6 +81,7 @@ export function createServices(config: AppConfig, logger: Logger, prisma?: Prism
     conversations,
     handoffs,
     nanoGptCredit,
+    hostMonitor,
     notifier,
     config,
     logger,
@@ -89,6 +93,7 @@ export function createServices(config: AppConfig, logger: Logger, prisma?: Prism
     openai,
     nanoGptBalances,
     nanoGptCredit,
+    hostMonitor,
     vectors,
     retrieval,
     notifier,

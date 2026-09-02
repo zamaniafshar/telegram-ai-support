@@ -29,6 +29,7 @@ import {
   type QueuePolicy,
 } from '../ai/availability.js';
 import type { AdminNotifier } from '../telegram-admin/notifier.js';
+import type { HostResourceMonitor } from '../observability/host-monitor.js';
 
 const adminSelect = {
   id: true,
@@ -52,6 +53,7 @@ export class MiniAppManagementService {
     private readonly config: AppConfig,
     private readonly availability?: AiAvailabilityService,
     private readonly notifier?: AdminNotifier,
+    private readonly hostMonitor?: HostResourceMonitor,
   ) {}
 
   businesses(context: MiniAppSessionContext) {
@@ -73,6 +75,7 @@ export class MiniAppManagementService {
       conversationsToday,
       connection,
       recent,
+      hostStatus,
     ] = await Promise.all([
       this.prisma.handoff.count({
         where: {
@@ -104,6 +107,7 @@ export class MiniAppManagementService {
         take: 5,
         include: { conversation: { include: { customer: true } } },
       }),
+      this.hostMonitor ? this.hostMonitor.getStatus() : Promise.resolve(null),
     ]);
     return {
       business: {
@@ -127,6 +131,7 @@ export class MiniAppManagementService {
         expiresAt: handoff.expiresAt,
         claimed: Boolean(handoff.claimedBy),
       })),
+      hostOverloaded: hostStatus?.isOverloaded ?? false,
     };
   }
 
@@ -743,6 +748,7 @@ export class MiniAppManagementService {
       aiAvailability,
       aiSuppressions,
       settingsChanges,
+      hostStatus,
     ] = await Promise.all([
       this.health.readiness(),
       this.prisma.indexingJob.groupBy({
@@ -788,6 +794,7 @@ export class MiniAppManagementService {
           },
         },
       }),
+      this.hostMonitor ? this.hostMonitor.getStatus() : Promise.resolve(null),
     ]);
     const showDiagnostics = context.admin.role !== AdminRole.SUPPORT;
     return {
@@ -810,6 +817,7 @@ export class MiniAppManagementService {
         suppressions: Object.fromEntries(aiSuppressions.map((item) => [item.action, item._count])),
         settingsChanges,
       },
+      host: showDiagnostics && hostStatus ? hostStatus : undefined,
     };
   }
 

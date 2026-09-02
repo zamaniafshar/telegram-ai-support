@@ -372,13 +372,47 @@ export class BusinessUpdateIngestor {
     if (!deleted) throw new Error('Deleted message update missing');
     await this.prisma.$transaction(async (tx) => {
       await this.#insertProcessed(tx, update, correlationId);
+      const targetMessages = await tx.message.findMany({
+        where: {
+          businessConnectionId: deleted.business_connection_id,
+          telegramChatId: telegramId(deleted.chat.id),
+          telegramMessageId: { in: deleted.message_ids.map(telegramId) },
+        },
+        select: { id: true },
+      });
+      const messageIds = targetMessages.map((m) => m.id);
+      if (messageIds.length > 0) {
+        await tx.conversationJob.updateMany({
+          where: {
+            messageId: { in: messageIds },
+            status: {
+              in: [
+                MessageProcessingStatus.PENDING,
+                MessageProcessingStatus.READY,
+                MessageProcessingStatus.WAITING_FOR_AI_AVAILABILITY,
+              ],
+            },
+          },
+          data: {
+            status: MessageProcessingStatus.CANCELLED_BY_HUMAN,
+            leaseOwner: null,
+            leaseExpiresAt: null,
+            lastErrorCode: 'MESSAGE_DELETED',
+          },
+        });
+      }
       await tx.message.updateMany({
         where: {
           businessConnectionId: deleted.business_connection_id,
           telegramChatId: telegramId(deleted.chat.id),
           telegramMessageId: { in: deleted.message_ids.map(telegramId) },
         },
-        data: { deletedAt: new Date(), text: null },
+        data: {
+          deletedAt: new Date(),
+          text: null,
+          processingStatus: MessageProcessingStatus.CANCELLED_BY_HUMAN,
+          processingErrorCode: 'MESSAGE_DELETED',
+        },
       });
     });
     return { duplicate: false, type: 'deleted_business_messages' };

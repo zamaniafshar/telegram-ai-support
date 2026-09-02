@@ -36,7 +36,15 @@ function businessDestination(path: string, businessAccountId: string): string {
   return `${path}?business=${encodeURIComponent(businessAccountId)}`;
 }
 
-export class AdminNotifier implements IndexingNotifier, ModeChangeNotifier {
+export interface HostResourceNotifier {
+  hostResourceOverloaded(input: {
+    cpuPercent: number;
+    memoryPercent: number;
+    durationHours: number;
+  }): Promise<void>;
+}
+
+export class AdminNotifier implements IndexingNotifier, ModeChangeNotifier, HostResourceNotifier {
   constructor(
     private readonly prisma: PrismaClient,
     private readonly telegram: TelegramApi,
@@ -313,6 +321,24 @@ export class AdminNotifier implements IndexingNotifier, ModeChangeNotifier {
       relatedEntityId: 'provider-credit',
       titleFa: '🚨 پاسخ‌گویی هوشمند با اختلال روبه‌رو است',
       summaryFa: 'اعتبار سرویس برای پردازش درخواست‌ها کافی نیست.',
+      destinationPath: '/system',
+    });
+  }
+
+  async hostResourceOverloaded(input: {
+    cpuPercent: number;
+    memoryPercent: number;
+    durationHours: number;
+  }): Promise<void> {
+    const hourBucket = new Date().toISOString().slice(0, 13);
+    await this.enqueue(this.prisma, {
+      dedupeKey: `HOST_RESOURCE_OVERLOAD:${hourBucket}`,
+      type: 'HOST_RESOURCE_OVERLOAD',
+      severity: NotificationSeverity.ERROR,
+      relatedEntityType: 'System',
+      relatedEntityId: 'host-resource',
+      titleFa: '🚨 هشدار بحرانی مصرف منابع هاست',
+      summaryFa: `مصرف منابع بیش از ۸۰٪ به مدت ${input.durationHours} ساعت مداوم گزارش شد (CPU: ${input.cpuPercent}٪، رم: ${input.memoryPercent}٪).`,
       destinationPath: '/system',
     });
   }

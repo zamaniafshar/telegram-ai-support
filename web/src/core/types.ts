@@ -116,3 +116,18 @@ export interface AdminAccount {
   isActive: boolean;
   protected: boolean;
 }
+
+export interface HostHealth {
+  cpuPercent: number;
+  memoryPercent: number;
+  memoryUsedMb: number;
+  memoryTotalMb: number;
+  processMemoryMb: number;
+  continuousHighUsageSince: string | null;
+  continuousHighUsageMinutes: number;
+  isOverloaded: boolean;
+  thresholdPercent: number;
+  overloadDurationHours: number;
+  lastCheckedAt: string | null;
+}
+

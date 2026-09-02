@@ -153,9 +153,9 @@ export class ConversationProcessor {
         await this.#releaseBusiness(businessAccountId, workerId);
         continue;
       }
-      count += 1;
       try {
-        await this.#processConversation(conversationId, workerId);
+        const processed = await this.#processConversation(conversationId, workerId);
+        if (processed) count += 1;
       } catch (error) {
         await this.#handleFailure(conversationId, workerId, error);
       } finally {
@@ -176,7 +176,7 @@ export class ConversationProcessor {
     });
   }
 
-  async #processConversation(conversationId: string, workerId: string): Promise<void> {
+  async #processConversation(conversationId: string, workerId: string): Promise<boolean> {
     const now = new Date();
     const traceStartedAt = Date.now();
     const batchId = newId();
@@ -192,7 +192,40 @@ export class ConversationProcessor {
       orderBy: { message: { sentAt: 'asc' } },
     });
     const firstJob = jobs[0];
-    if (!firstJob) return;
+    if (!firstJob) {
+      const orphanJobs = await this.prisma.conversationJob.findMany({
+        where: {
+          conversationId,
+          status: { in: [...runnable] },
+          processAfter: { lte: now },
+          OR: [{ leaseExpiresAt: null }, { leaseExpiresAt: { lt: now } }, { leaseOwner: workerId }],
+        },
+        select: { id: true, messageId: true },
+      });
+      if (orphanJobs.length > 0) {
+        const orphanIds = orphanJobs.map((j) => j.id);
+        const orphanMessageIds = orphanJobs.map((j) => j.messageId);
+        await this.prisma.$transaction([
+          this.prisma.conversationJob.updateMany({
+            where: { id: { in: orphanIds } },
+            data: {
+              status: MessageProcessingStatus.CANCELLED_BY_HUMAN,
+              leaseOwner: null,
+              leaseExpiresAt: null,
+              lastErrorCode: 'EMPTY_OR_DELETED_MESSAGE',
+            },
+          }),
+          this.prisma.message.updateMany({
+            where: { id: { in: orphanMessageIds }, processingStatus: { in: [...runnable] } },
+            data: {
+              processingStatus: MessageProcessingStatus.CANCELLED_BY_HUMAN,
+              processingErrorCode: 'EMPTY_OR_DELETED_MESSAGE',
+            },
+          }),
+        ]);
+      }
+      return false;
+    }
     const ids = jobs.map((job) => job.id);
     const claimed = await this.prisma.conversationJob.updateMany({
       where: {
@@ -211,7 +244,7 @@ export class ConversationProcessor {
     });
     if (claimed.count !== jobs.length) {
       await this.#returnToReady(ids, 'BATCH_CLAIM_CONFLICT');
-      return;
+      return false;
     }
 
     const conversation = await this.prisma.conversation.findUniqueOrThrow({
@@ -263,7 +296,7 @@ export class ConversationProcessor {
         'BACKLOG_EXPIRED',
         traceStartedAt,
       );
-      return;
+      return true;
     }
     if (conversation.mode !== ConversationMode.AI || conversation.handoffs.length > 0) {
       await this.#finishBatch(
@@ -284,7 +317,7 @@ export class ConversationProcessor {
         'HUMAN_MODE_OR_HANDOFF',
         traceStartedAt,
       );
-      return;
+      return true;
     }
     if (this.#hasHumanReply(conversation.messages, firstAt)) {
       await this.#finishBatch(
@@ -305,7 +338,7 @@ export class ConversationProcessor {
         'HUMAN_REPLIED',
         traceStartedAt,
       );
-      return;
+      return true;
     }
 
     const availability = await this.availability.check({
@@ -325,7 +358,7 @@ export class ConversationProcessor {
         availability.reason,
         traceStartedAt,
       );
-      return;
+      return true;
     }
     await this.#audit(conversation.businessAccountId, conversationId, 'AI_BACKLOG_RELEASED', {
       messageCount: jobs.length,
@@ -353,7 +386,7 @@ export class ConversationProcessor {
         abuseReason,
         traceStartedAt,
       );
-      return;
+      return true;
     }
 
     const customerText = currentMessageBatch.map((item) => item.text).join('\n');
@@ -379,7 +412,7 @@ export class ConversationProcessor {
         'EXPLICIT_HUMAN_REQUEST',
         traceStartedAt,
       );
-      return;
+      return true;
     }
 
     let answer: string | null = route.kind === 'SAFE_GREETING' ? route.answer : null;
@@ -413,7 +446,7 @@ export class ConversationProcessor {
           'AI_NOT_ANSWERABLE',
           traceStartedAt,
         );
-        return;
+        return true;
       }
       answer = decision.answer;
     } else {
@@ -456,7 +489,7 @@ export class ConversationProcessor {
         finalState,
         traceStartedAt,
       );
-      return;
+      return true;
     }
     await this.messenger.sendAiAnswer(conversationId, answer, firstJob.messageId);
     await this.#finishBatch(jobs, MessageProcessingStatus.PROCESSED, batchId, null);
@@ -467,6 +500,7 @@ export class ConversationProcessor {
       { messageCount: jobs.length, batchId },
     );
     await this.#setTraceOutcome(firstJob.messageId, AiTraceOutcome.SENT, null, traceStartedAt);
+    return true;
   }
 
   async #reserveAutomatedResponse(

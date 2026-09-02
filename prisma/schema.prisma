@@ -569,3 +569,25 @@ model ProviderCreditMonitorState {
 
   @@index([nextCheckAt, leaseExpiresAt])
 }
+
+model HostResourceMonitorState {
+  id                         String    @id @db.VarChar(40)
+  nextCheckAt                DateTime  @default(now())
+  leaseOwner                 String?   @db.VarChar(64)
+  leaseExpiresAt             DateTime?
+  lastCheckedAt              DateTime?
+  cpuPercent                 Float     @default(0)
+  memoryPercent              Float     @default(0)
+  memoryUsedMb               Int       @default(0)
+  memoryTotalMb              Int       @default(0)
+  processMemoryMb            Int       @default(0)
+  highUsageStartedAt         DateTime?
+  continuousHighUsageMinutes Int       @default(0)
+  isOverloaded               Boolean   @default(false)
+  lastOverloadAlertAt        DateTime?
+  createdAt                  DateTime  @default(now())
+  updatedAt                  DateTime  @updatedAt
+
+  @@index([nextCheckAt, leaseExpiresAt])
+}
+

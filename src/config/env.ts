@@ -111,6 +111,11 @@ const envSchema = z.object({
   AI_OUTPUT_COST_PER_MILLION_USD: z.coerce.number().nonnegative().optional(),
   RUN_WORKERS_IN_API: booleanString,
 
+  HOST_MONITOR_THRESHOLD_PERCENT: z.coerce.number().min(1).max(100).default(80),
+  HOST_MONITOR_OVERLOAD_DURATION_HOURS: z.coerce.number().min(1).max(24).default(2),
+  HOST_MONITOR_CHECK_INTERVAL_MS: positiveInt(60_000),
+  HOST_MONITOR_ALERT_COOLDOWN_HOURS: positiveInt(6),
+
   TRUST_PROXY: booleanString,
   WEBHOOK_RATE_LIMIT_MAX: positiveInt(300),
   WEBHOOK_RATE_LIMIT_WINDOW: z.string().default('1 minute'),
@@ -254,6 +259,12 @@ export function loadConfig(source: NodeJS.ProcessEnv = process.env) {
       indexingMaxAttempts: env.INDEXING_MAX_ATTEMPTS,
       indexingBackoffBaseMs: env.INDEXING_BACKOFF_BASE_MS,
       runInApi: env.RUN_WORKERS_IN_API,
+    },
+    hostMonitor: {
+      thresholdPercent: env.HOST_MONITOR_THRESHOLD_PERCENT,
+      overloadDurationHours: env.HOST_MONITOR_OVERLOAD_DURATION_HOURS,
+      checkIntervalMs: env.HOST_MONITOR_CHECK_INTERVAL_MS,
+      alertCooldownHours: env.HOST_MONITOR_ALERT_COOLDOWN_HOURS,
     },
   } as const;
 }

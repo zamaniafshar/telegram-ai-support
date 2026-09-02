@@ -8,6 +8,8 @@ import type { HandoffService } from '../handoffs/service.js';
 import type { NanoGptCreditMonitor } from '../ai/nanogpt-credit.js';
 import type { AdminNotifier } from '../telegram-admin/notifier.js';
 
+import type { HostResourceMonitor } from '../observability/host-monitor.js';
+
 export class WorkerRunner {
   readonly workerId = `worker:${randomUUID()}`;
 
@@ -16,6 +18,7 @@ export class WorkerRunner {
     private readonly conversations: ConversationProcessor,
     private readonly handoffs: HandoffService,
     private readonly creditMonitor: NanoGptCreditMonitor,
+    private readonly hostMonitor: HostResourceMonitor,
     private readonly notifications: AdminNotifier,
     private readonly config: AppConfig,
     private readonly logger: Logger,
@@ -25,18 +28,21 @@ export class WorkerRunner {
     this.logger.info({ workerId: this.workerId }, 'durable worker started');
     while (!signal.aborted) {
       try {
-        const [indexing, conversations, expired, creditChecked, notifications] = await Promise.all([
-          this.indexing.runBatch(this.workerId),
-          this.conversations.runBatch(this.workerId),
-          this.handoffs.expireBatch(),
-          this.creditMonitor.runDailyCheckIfDue(this.workerId),
-          this.notifications.runBatch(this.workerId),
-        ]);
-        if (indexing + conversations + expired + notifications > 0 || creditChecked) {
+        const [indexing, conversations, expired, creditChecked, hostChecked, notifications] =
+          await Promise.all([
+            this.indexing.runBatch(this.workerId),
+            this.conversations.runBatch(this.workerId),
+            this.handoffs.expireBatch(),
+            this.creditMonitor.runDailyCheckIfDue(this.workerId),
+            this.hostMonitor.runCheckIfDue(this.workerId),
+            this.notifications.runBatch(this.workerId),
+          ]);
+        if (indexing + conversations + expired + notifications > 0) {
           this.logger.debug(
-            { indexing, conversations, expired, creditChecked, notifications },
+            { indexing, conversations, expired, creditChecked, hostChecked, notifications },
             'worker cycle completed',
           );
+          await delay(50, undefined, { signal }).catch(() => undefined);
           continue;
         }
       } catch (error) {
