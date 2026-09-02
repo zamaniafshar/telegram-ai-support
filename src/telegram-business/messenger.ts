@@ -3,13 +3,21 @@ import {
   MessageDirection,
   MessageProcessingStatus,
   SenderType,
+  type Prisma,
   type PrismaClient,
 } from '@prisma/client';
 import type { Logger } from 'pino';
 import type { AppConfig } from '../config/env.js';
 import type { TelegramApi } from './client.js';
+import type { SentTelegramMessage } from './types.js';
 import { AppError } from '../utils/errors.js';
 import { newId, telegramId } from '../utils/ids.js';
+import { calculateTypingDelayMs, splitSupportAnswer } from './splitter.js';
+import {
+  isTelegramEntityParseError,
+  sanitizeTelegramHtml,
+  stripHtml,
+} from '../utils/telegram-format.js';
 
 const typingRefreshMs = 4_000;
 
@@ -22,7 +30,52 @@ export class BusinessMessenger {
   ) {}
 
   async sendAiAnswer(conversationId: string, text: string, sourceMessageId: string): Promise<void> {
-    await this.#send(conversationId, text, SenderType.AI, false, sourceMessageId);
+    if (await this.prisma.message.findUnique({ where: { sourceMessageId } })) {
+      this.logger.info({ conversationId, sourceMessageId }, 'duplicate business send suppressed');
+      return;
+    }
+
+    const { conversation, connection } = await this.#validateAndGetContext(conversationId, false);
+    const parts = splitSupportAnswer(text);
+
+    for (let index = 0; index < parts.length; index += 1) {
+      const part = parts[index];
+      if (!part) continue;
+      if (index > 0) {
+        // Trigger typing indicator and natural delay between consecutive messages
+        await this.telegram
+          .sendChatAction(conversation.telegramChatId, 'typing', {
+            businessConnectionId: connection.id,
+          })
+          .catch((error: unknown) => {
+            this.logger.debug({ err: error, conversationId }, 'inter-message typing indicator failed');
+          });
+
+        const delayMs = calculateTypingDelayMs(part.length);
+        await new Promise((resolve) => setTimeout(resolve, delayMs));
+      }
+
+      await this.#sendPart({
+        conversationId,
+        telegramChatId: conversation.telegramChatId,
+        connectionId: connection.id,
+        text: part,
+        senderType: SenderType.AI,
+        sourceMessageId: index === 0 ? sourceMessageId : null,
+        metadata: {
+          persistedFromSendResponse: true,
+          splitPartIndex: index,
+          splitTotalParts: parts.length,
+          ...(index > 0 ? { parentSourceMessageId: sourceMessageId } : {}),
+        },
+      });
+    }
+
+    await this.#markSourceAsRead(sourceMessageId);
+    this.logger.info(
+      { conversationId, partsCount: parts.length, senderType: SenderType.AI },
+      'business AI message(s) sent',
+    );
   }
 
   async whileTyping<T>(conversationId: string, operation: () => Promise<T>): Promise<T> {
@@ -76,20 +129,31 @@ export class BusinessMessenger {
     text: string,
     sourceMessageId: string,
   ): Promise<void> {
-    await this.#send(conversationId, text, SenderType.SYSTEM, true, sourceMessageId);
-  }
-
-  async #send(
-    conversationId: string,
-    text: string,
-    senderType: SenderType,
-    handoffAcknowledgement: boolean,
-    sourceMessageId: string,
-  ): Promise<void> {
     if (await this.prisma.message.findUnique({ where: { sourceMessageId } })) {
       this.logger.info({ conversationId, sourceMessageId }, 'duplicate business send suppressed');
       return;
     }
+
+    const { conversation, connection } = await this.#validateAndGetContext(conversationId, true);
+    await this.#sendPart({
+      conversationId,
+      telegramChatId: conversation.telegramChatId,
+      connectionId: connection.id,
+      text,
+      senderType: SenderType.SYSTEM,
+      sourceMessageId,
+      metadata: { persistedFromSendResponse: true, handoffAcknowledgement: true },
+    });
+    this.logger.info({ conversationId, senderType: SenderType.SYSTEM }, 'handoff acknowledgement sent');
+  }
+
+  async #validateAndGetContext(
+    conversationId: string,
+    handoffAcknowledgement: boolean,
+  ): Promise<{
+    conversation: { id: string; telegramChatId: bigint; mode: ConversationMode };
+    connection: { id: string };
+  }> {
     const conversation = await this.prisma.conversation.findUniqueOrThrow({
       where: { id: conversationId },
       include: {
@@ -129,37 +193,75 @@ export class BusinessMessenger {
       throw new AppError('Telegram reply window has expired', 'TELEGRAM_REPLY_WINDOW_EXPIRED', 409);
     }
 
-    const sent = await this.telegram.sendMessage(conversation.telegramChatId, text, {
-      businessConnectionId: connection.id,
-    });
+    return {
+      conversation: {
+        id: conversation.id,
+        telegramChatId: conversation.telegramChatId,
+        mode: conversation.mode,
+      },
+      connection: { id: connection.id },
+    };
+  }
+
+  async #sendPart(options: {
+    conversationId: string;
+    telegramChatId: bigint;
+    connectionId: string;
+    text: string;
+    senderType: SenderType;
+    sourceMessageId: string | null;
+    metadata: Record<string, unknown>;
+  }): Promise<void> {
+    const formattedHtml = sanitizeTelegramHtml(options.text);
+    let sent: SentTelegramMessage;
+    try {
+      sent = await this.telegram.sendMessage(options.telegramChatId, formattedHtml, {
+        businessConnectionId: options.connectionId,
+        parseMode: 'HTML',
+      });
+    } catch (error) {
+      if (isTelegramEntityParseError(error)) {
+        this.logger.warn(
+          { conversationId: options.conversationId, err: error },
+          'Telegram HTML parsing failed, falling back to plain text',
+        );
+        const plain = stripHtml(options.text);
+        sent = await this.telegram.sendMessage(options.telegramChatId, plain, {
+          businessConnectionId: options.connectionId,
+        });
+      } else {
+        throw error;
+      }
+    }
+
     await this.prisma.message.upsert({
       where: {
         businessConnectionId_telegramChatId_telegramMessageId: {
-          businessConnectionId: connection.id,
-          telegramChatId: conversation.telegramChatId,
+          businessConnectionId: options.connectionId,
+          telegramChatId: options.telegramChatId,
           telegramMessageId: telegramId(sent.message_id),
         },
       },
       create: {
         id: newId(),
-        conversationId,
-        businessConnectionId: connection.id,
-        telegramChatId: conversation.telegramChatId,
+        conversationId: options.conversationId,
+        businessConnectionId: options.connectionId,
+        telegramChatId: options.telegramChatId,
         telegramMessageId: telegramId(sent.message_id),
-        senderType,
+        senderType: options.senderType,
         direction: MessageDirection.OUTGOING,
-        text,
+        text: options.text,
         sentAt: new Date(sent.date * 1_000),
         processingStatus: MessageProcessingStatus.NOT_APPLICABLE,
-        sourceMessageId,
-        rawMetadata: { persistedFromSendResponse: true },
+        sourceMessageId: options.sourceMessageId,
+        rawMetadata: options.metadata as Prisma.InputJsonValue,
       },
-      update: { senderType, text, sourceMessageId },
+      update: {
+        senderType: options.senderType,
+        text: options.text,
+        sourceMessageId: options.sourceMessageId,
+      },
     });
-    if (senderType === SenderType.AI) {
-      await this.#markSourceAsRead(sourceMessageId);
-    }
-    this.logger.info({ conversationId, senderType }, 'business message sent');
   }
 
   async #markSourceAsRead(sourceMessageId: string): Promise<void> {

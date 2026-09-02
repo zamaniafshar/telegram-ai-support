@@ -22,6 +22,7 @@ export interface SendMessageOptions {
   businessConnectionId?: string;
   replyMarkup?: InlineKeyboardMarkup;
   disableWebPagePreview?: boolean;
+  parseMode?: 'HTML' | 'MarkdownV2';
 }
 
 export interface SendChatActionOptions {
@@ -127,6 +128,7 @@ export class TelegramBotApiClient implements TelegramApi {
     const result = await this.#call<unknown>('sendMessage', {
       chat_id: chatId,
       text,
+      ...(options.parseMode ? { parse_mode: options.parseMode } : {}),
       ...(options.businessConnectionId
         ? { business_connection_id: options.businessConnectionId }
         : {}),

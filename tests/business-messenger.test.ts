@@ -153,3 +153,113 @@ describe('business typing indicator', () => {
     );
   });
 });
+
+describe('business AI message formatting and splitting', () => {
+  it('sends AI answer with HTML parse mode', async () => {
+    const prisma = {
+      conversation: {
+        findUniqueOrThrow: vi.fn().mockResolvedValue(conversation(ConversationMode.AI)),
+      },
+      message: {
+        findUnique: vi.fn().mockResolvedValue(null),
+        upsert: vi.fn().mockResolvedValue({}),
+      },
+    };
+    const telegram = {
+      sendMessage: vi.fn().mockResolvedValue({ message_id: 21, date: 1_700_000_000 }),
+    };
+    const messenger = new BusinessMessenger(
+      prisma as never,
+      telegram as never,
+      testConfig(),
+      silentLogger,
+    );
+
+    await messenger.sendAiAnswer('conversation-1', 'سلام! <b>دوره جامع</b>', 'source-1');
+
+    expect(telegram.sendMessage).toHaveBeenCalledWith(
+      123n,
+      'سلام! <b>دوره جامع</b>',
+      expect.objectContaining({
+        businessConnectionId: 'connection-1',
+        parseMode: 'HTML',
+      }),
+    );
+  });
+
+  it('falls back to plain text if Telegram rejects HTML parsing', async () => {
+    const prisma = {
+      conversation: {
+        findUniqueOrThrow: vi.fn().mockResolvedValue(conversation(ConversationMode.AI)),
+      },
+      message: {
+        findUnique: vi.fn().mockResolvedValue(null),
+        upsert: vi.fn().mockResolvedValue({}),
+      },
+    };
+    const telegram = {
+      sendMessage: vi
+        .fn()
+        .mockRejectedValueOnce(new Error("Telegram 400: Bad Request: can't parse entities"))
+        .mockResolvedValueOnce({ message_id: 22, date: 1_700_000_000 }),
+    };
+    const messenger = new BusinessMessenger(
+      prisma as never,
+      telegram as never,
+      testConfig(),
+      silentLogger,
+    );
+
+    await messenger.sendAiAnswer('conversation-1', '<b>متن تست</b>', 'source-1');
+
+    expect(telegram.sendMessage).toHaveBeenCalledTimes(2);
+    expect(telegram.sendMessage).toHaveBeenLastCalledWith(
+      123n,
+      'متن تست',
+      expect.objectContaining({
+        businessConnectionId: 'connection-1',
+      }),
+    );
+  });
+
+  it('splits long responses and sends consecutive parts with typing action', async () => {
+    vi.useFakeTimers();
+    const prisma = {
+      conversation: {
+        findUniqueOrThrow: vi.fn().mockResolvedValue(conversation(ConversationMode.AI)),
+      },
+      message: {
+        findUnique: vi.fn().mockResolvedValue(null),
+        upsert: vi.fn().mockResolvedValue({}),
+      },
+    };
+    const telegram = {
+      sendMessage: vi.fn().mockResolvedValue({ message_id: 31, date: 1_700_000_000 }),
+      sendChatAction: vi.fn().mockResolvedValue(undefined),
+    };
+    const messenger = new BusinessMessenger(
+      prisma as never,
+      telegram as never,
+      testConfig(),
+      silentLogger,
+    );
+
+    const longAnswer =
+      'بخش اول: توضیحات کامل درباره دوره‌های جامع بیوشیمی ویژه کنکور کارشناسی ارشد و دکتری به همراه آزمون‌های کلاسی پایان هر فصل و جزوه چاپی اختصاصی.\n\n' +
+      'بخش دوم: شرایط ثبت‌نام و دسترسی نرم‌افزار اسپات‌پلیر با لایسنس اختصاصی تک‌کاربره برای کامپیوتر یا موبایل و نحوه ارسال فیزیکی جزوات از طریق شرکت تیپاکس.\n\n' +
+      'بخش سوم: جهت راهنمایی دقیق‌تر و ثبت‌نام در کلاس، لطفاً بفرمایید داوطلب کنکور ۱۴۰۵ هستید یا کنکور ۱۴۰۶ تا اطلاعات و شرایط تخفیف دوره مربوطه خدمتتون ارسال بشه.';
+
+    const sendPromise = messenger.sendAiAnswer('conversation-1', longAnswer, 'source-1');
+    await vi.runAllTimersAsync();
+    await sendPromise;
+
+    expect(telegram.sendMessage).toHaveBeenCalledTimes(3);
+    expect(telegram.sendChatAction).toHaveBeenCalledWith(
+      123n,
+      'typing',
+      expect.objectContaining({ businessConnectionId: 'connection-1' }),
+    );
+    vi.useRealTimers();
+  });
+});
+
