@@ -82,7 +82,7 @@ export function isSectionHeading(text) {
     if (/[:：]$/.test(clean))
         return true;
     // Starts with bullet point or number: NOT a heading, it's a list item
-    if (/^[•\-\*▫️▪️\d+[\.\)]]/.test(clean))
+    if (/^(?:[-•*▫▪]|\d+[.)])/.test(clean))
         return false;
     // Single line with no terminal sentence punctuation (. ! ? ؟)
     const isSingleLine = !clean.includes('\n');

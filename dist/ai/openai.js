@@ -118,7 +118,7 @@ export class OpenAiAdapter {
             '- The only punctuation marks allowed inside answer text are: Persian comma «،», Persian question mark «؟», colon «:», and full stop «.».',
             '- Never use exclamation marks, semicolons, dashes or hyphens (- – —), ellipses (...), parentheses, quotation marks or guillemets («» "" \'\'), slashes, tildes, or any doubled/stacked punctuation such as ؟! or ?? or !!.',
             '- This restriction applies to prose only. It never applies to the HTML syntax required by the TELEGRAM HTML FORMATTING rule (the quotes inside href="URL", or the angle brackets in <b>, <code>, <a>), the message split delimiter «===SPLIT===», or to digits inside numbers, prices, or codes.',
-            '- Do not mirror the customer\'s punctuation style. If the customer writes with «!!!» or «...», do not copy that pattern back.',
+            "- Do not mirror the customer's punctuation style. If the customer writes with «!!!» or «...», do not copy that pattern back.",
             '- Before producing the final answer, scan it once and remove or replace any character that is not «،», «؟», «:», or «.».',
             '',
             'VISUAL SPACING & READABILITY',

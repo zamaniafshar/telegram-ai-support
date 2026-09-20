@@ -4,6 +4,9 @@ import { telegramUpdateSchema } from './types.js';
 const MIN_ERROR_DELAY_MS = 2_000;
 const MAX_ERROR_DELAY_MS = 15_000;
 const CONFLICT_DELAY_MS = 5_000;
+function isAborted(signal) {
+    return signal.aborted;
+}
 export class LongPollingRunner {
     telegram;
     allowedUpdates;
@@ -18,12 +21,12 @@ export class LongPollingRunner {
     async run(signal) {
         let offset;
         let consecutiveErrors = 0;
-        while (!signal.aborted) {
+        while (!isAborted(signal)) {
             try {
                 const updates = await this.telegram.getUpdates(offset, this.allowedUpdates, 25);
                 consecutiveErrors = 0;
                 for (const raw of updates) {
-                    if (signal.aborted)
+                    if (isAborted(signal))
                         return;
                     let rawUpdateId;
                     if (typeof raw === 'object' &&
@@ -38,7 +41,7 @@ export class LongPollingRunner {
                         await this.handler(update);
                     }
                     catch (itemError) {
-                        if (signal.aborted)
+                        if (isAborted(signal))
                             return;
                         if (rawUpdateId !== undefined) {
                             offset = Math.max(offset ?? 0, rawUpdateId + 1);
@@ -48,7 +51,7 @@ export class LongPollingRunner {
                 }
             }
             catch (error) {
-                if (signal.aborted || (error instanceof Error && error.name === 'AbortError'))
+                if (isAborted(signal) || (error instanceof Error && error.name === 'AbortError'))
                     return;
                 consecutiveErrors += 1;
                 const isConflict = (error instanceof AppError && error.statusCode === 409) ||
