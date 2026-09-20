@@ -2,7 +2,7 @@ import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import { request } from '../../core/api';
 import { faLabel, formatDate } from '../../core/format';
-import type { HandoffSummary, HostHealth } from '../../core/types';
+import type { HandoffSummary } from '../../core/types';
 import { Badge, Card, EmptyState, KeyValue, PageHeader, QueryState } from '../../components/ui';
 import { useSession } from '../../app/SessionProvider';
 
@@ -16,7 +16,6 @@ interface Dashboard {
   };
   connection: { status: string; updatedAt: string | null };
   recentHandoffs: HandoffSummary[];
-  hostOverloaded?: boolean;
 }
 
 export function OverviewPage() {
@@ -31,18 +30,6 @@ export function OverviewPage() {
       {data && (
         <>
           <PageHeader title="نمای کلی" subtitle={data.business.name} />
-          {data.hostOverloaded && (
-            <div className="red-flag-banner">
-              <div className="red-flag-icon">🚨</div>
-              <div className="red-flag-content">
-                <strong>اخطار بحرانی: مصرف منابع هاست بیش از ۸۰٪ است</strong>
-                <p>مصرف CPU یا حافظه به مدت بیش از ۲ ساعت مداوم در وضعیت بحرانی قرار دارد.</p>
-              </div>
-              <Link to="/system" className="btn-alert-link">
-                مشاهده منابع
-              </Link>
-            </div>
-          )}
           <div className="metric-grid">
             <div className="metric">
               <span>◉</span>
@@ -150,7 +137,6 @@ interface Health {
   ready: boolean;
   checks?: Record<string, boolean>;
   queues?: Record<string, { status: string; _count: number }[]>;
-  host?: HostHealth;
 }
 const checkNames: Record<string, string> = {
   process: 'فرایند اصلی',
@@ -172,138 +158,24 @@ export function SystemPage() {
     <>
       <PageHeader
         title="سلامت سامانه"
-        subtitle={
-          health?.host?.isOverloaded
-            ? '🚨 اخطار بحرانی مصرف منابع هاست'
-            : health?.ready
-              ? 'وضعیت کلی سالم است'
-              : 'وضعیت سرویس‌ها و پردازش‌های پس‌زمینه'
-        }
+        subtitle={health?.ready ? 'وضعیت کلی سالم است' : 'وضعیت سرویس‌ها و پردازش‌های پس‌زمینه'}
       />
       <QueryState pending={query.isPending} error={query.error}>
         {health && (
           <>
-            {health.host?.isOverloaded && (
-              <div className="red-flag-banner">
-                <div className="red-flag-icon">🚨</div>
-                <div className="red-flag-content">
-                  <strong>اخطار بحرانی: مصرف منابع هاست بیش از ۸۰٪ است</strong>
-                  <p>
-                    مصرف CPU یا حافظه به مدت بیش از{' '}
-                    {health.host.overloadDurationHours.toLocaleString('fa-IR')} ساعت مداوم بالاتر از
-                    ۸۰٪ گزارش شده است (پردازنده:{' '}
-                    {health.host.cpuPercent.toLocaleString('fa-IR')}٪، رم:{' '}
-                    {health.host.memoryPercent.toLocaleString('fa-IR')}٪).
-                  </p>
-                </div>
-              </div>
-            )}
-            <div className={`notice ${health.ready && !health.host?.isOverloaded ? '' : 'error'}`}>
-              <span>{health.ready && !health.host?.isOverloaded ? '✓' : '!'}</span>
+            <div className={`notice ${health.ready ? '' : 'error'}`}>
+              <span>{health.ready ? '✓' : '!'}</span>
               <div>
                 <strong>
-                  {health.ready && !health.host?.isOverloaded
-                    ? 'سامانه آماده پاسخ‌گویی است'
-                    : 'سامانه نیازمند بررسی است'}
+                  {health.ready ? 'سامانه آماده پاسخ‌گویی است' : 'سامانه نیازمند بررسی است'}
                 </strong>
                 <p>
-                  {health.ready && !health.host?.isOverloaded
+                  {health.ready
                     ? 'سرویس‌های اصلی بدون اختلال گزارش شده‌اند.'
-                    : 'یک یا چند سرویس اصلی یا منابع سرور در وضعیت نامطلوب است.'}
+                    : 'یک یا چند سرویس اصلی در وضعیت مطلوب نیست.'}
                 </p>
               </div>
             </div>
-            {health.host && (
-              <Card title="مصرف منابع هاست و سرور">
-                <div className="resource-item">
-                  <div className="resource-label-row">
-                    <span>پردازنده (CPU)</span>
-                    <Badge
-                      status={
-                        health.host.cpuPercent >= 80
-                          ? 'FAILED'
-                          : health.host.cpuPercent >= 60
-                            ? 'ATTENTION'
-                            : 'READY'
-                      }
-                    >
-                      {health.host.cpuPercent.toLocaleString('fa-IR')}٪
-                    </Badge>
-                  </div>
-                  <div className="resource-progress-bar">
-                    <div
-                      className={`resource-progress-fill ${
-                        health.host.cpuPercent >= 80
-                          ? 'critical'
-                          : health.host.cpuPercent >= 60
-                            ? 'warning'
-                            : 'normal'
-                      }`}
-                      style={{ width: `${Math.min(100, health.host.cpuPercent)}%` }}
-                    />
-                  </div>
-                </div>
-
-                <div className="resource-item">
-                  <div className="resource-label-row">
-                    <span>حافظه سرور (RAM)</span>
-                    <Badge
-                      status={
-                        health.host.memoryPercent >= 80
-                          ? 'FAILED'
-                          : health.host.memoryPercent >= 60
-                            ? 'ATTENTION'
-                            : 'READY'
-                      }
-                    >
-                      {health.host.memoryUsedMb.toLocaleString('fa-IR')} /{' '}
-                      {health.host.memoryTotalMb.toLocaleString('fa-IR')} مگابایت (
-                      {health.host.memoryPercent.toLocaleString('fa-IR')}٪)
-                    </Badge>
-                  </div>
-                  <div className="resource-progress-bar">
-                    <div
-                      className={`resource-progress-fill ${
-                        health.host.memoryPercent >= 80
-                          ? 'critical'
-                          : health.host.memoryPercent >= 60
-                            ? 'warning'
-                            : 'normal'
-                      }`}
-                      style={{ width: `${Math.min(100, health.host.memoryPercent)}%` }}
-                    />
-                  </div>
-                </div>
-
-                <div className="key-values" style={{ marginTop: '12px' }}>
-                  <KeyValue label="حافظه پردازش ربات (RSS)">
-                    {health.host.processMemoryMb.toLocaleString('fa-IR')} مگابایت
-                  </KeyValue>
-                  <KeyValue label="وضعیت پایداری مصرف">
-                    <Badge
-                      status={
-                        health.host.isOverloaded
-                          ? 'FAILED'
-                          : health.host.continuousHighUsageMinutes > 0
-                            ? 'ATTENTION'
-                            : 'READY'
-                      }
-                    >
-                      {health.host.isOverloaded
-                        ? 'بحرانی (بیش از ۲ ساعت بالای ۸۰٪)'
-                        : health.host.continuousHighUsageMinutes > 0
-                          ? `${health.host.continuousHighUsageMinutes.toLocaleString('fa-IR')} دقیقه بالای ۸۰٪`
-                          : 'عادی (پایدار)'}
-                    </Badge>
-                  </KeyValue>
-                  {health.host.lastCheckedAt && (
-                    <KeyValue label="آخرین بررسی منابع">
-                      {formatDate(health.host.lastCheckedAt, true)}
-                    </KeyValue>
-                  )}
-                </div>
-              </Card>
-            )}
             <div className="split-grid">
               <Card title="بررسی سرویس‌ها">
                 <div className="key-values">
