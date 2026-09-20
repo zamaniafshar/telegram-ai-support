@@ -1,10 +1,6 @@
 import { describe, expect, it } from 'vitest';
+import { calculateTypingDelayMs, splitSupportAnswer } from '../src/telegram-business/splitter.js';
 import {
-  calculateTypingDelayMs,
-  splitSupportAnswer,
-} from '../src/telegram-business/splitter.js';
-import {
-  escapeHtml,
   isTelegramEntityParseError,
   sanitizeTelegramHtml,
   stripHtml,
@@ -19,8 +15,10 @@ describe('splitSupportAnswer', () => {
   });
 
   it('splits long answers along paragraph breaks', () => {
-    const p1 = 'سلام وقتتون بخیر 🌱\n\nجزوات دکتر رضویان به صورت کتاب کار تدوین شدن و همراه با تدریس کلاس تکمیل می‌شن؛ به همین خاطر به‌تنهایی و بدون ثبت‌نام در دوره فروخته نمی‌شن.';
-    const p2 = 'دوره‌های کلاسی شامل تدریس صفر تا صد تمام فصول بیوشیمی، حل تست و پشتیبانی مستقیم استاد هستند.';
+    const p1 =
+      'سلام وقتتون بخیر 🌱\n\nجزوات دکتر رضویان به صورت کتاب کار تدوین شدن و همراه با تدریس کلاس تکمیل می‌شن؛ به همین خاطر به‌تنهایی و بدون ثبت‌نام در دوره فروخته نمی‌شن.';
+    const p2 =
+      'دوره‌های کلاسی شامل تدریس صفر تا صد تمام فصول بیوشیمی، حل تست و پشتیبانی مستقیم استاد هستند.';
     const p3 = 'برای راهنمایی دقیق‌تر، برای کنکور ۱۴۰۵ آماده می‌شید یا ۱۴۰۶؟ 🙏';
     const combined = `${p1}\n\n${p2}\n\n${p3}`;
 
@@ -31,7 +29,10 @@ describe('splitSupportAnswer', () => {
   });
 
   it('does not exceed maxChunks', () => {
-    const paragraphs = Array.from({ length: 8 }, (_, i) => `پاراگراف شماره ${i + 1} با توضیحات کافی برای تست تقسیم پیام‌ها.`);
+    const paragraphs = Array.from(
+      { length: 8 },
+      (_, i) => `پاراگراف شماره ${i + 1} با توضیحات کافی برای تست تقسیم پیام‌ها.`,
+    );
     const combined = paragraphs.join('\n\n');
 
     const parts = splitSupportAnswer(combined, { thresholdChars: 100, maxChunks: 3 });
@@ -60,9 +61,11 @@ describe('splitSupportAnswer', () => {
   });
 
   it('never orphans a heading at the end of a chunk without its content', () => {
-    const intro = 'برای کنکور ۱۴۰۶، دوره‌های جامع بیوشیمی دکتر رضویان به‌صورت آنلاین و آفلاین ارائه می‌شوند 🌱';
+    const intro =
+      'برای کنکور ۱۴۰۶، دوره‌های جامع بیوشیمی دکتر رضویان به‌صورت آنلاین و آفلاین ارائه می‌شوند 🌱';
     const heading = 'دوره جامع آنلاین';
-    const body = '• هزینه دوره: ۶٬۹۹۹٬۰۰۰ تومان.\n• هزینه با تخفیف پرداخت نقدی مدت محدود: ۵٬۹۹۹٬۰۰۰ تومان.\n• برگزاری در بستر کافه تدریس است و قابلیت بازپخش دارد.';
+    const body =
+      '• هزینه دوره: ۶٬۹۹۹٬۰۰۰ تومان.\n• هزینه با تخفیف پرداخت نقدی مدت محدود: ۵٬۹۹۹٬۰۰۰ تومان.\n• برگزاری در بستر کافه تدریس است و قابلیت بازپخش دارد.';
     const combined = `${intro}\n\n${heading}\n\n${body}`;
 
     // Under maxChunkChars where intro + heading would fit (~115 chars), but body does not fit
@@ -71,7 +74,7 @@ describe('splitSupportAnswer', () => {
     // Intro must be alone in part 0
     expect(parts[0]).toBe(intro);
     // Heading must be at the START of part 1, together with its body!
-    expect(parts[1].startsWith(heading)).toBe(true);
+    expect(parts[1]?.startsWith(heading)).toBe(true);
     expect(parts[1]).toContain('هزینه دوره: ۶٬۹۹۹٬۰۰۰ تومان');
   });
 
@@ -91,10 +94,20 @@ describe('splitSupportAnswer', () => {
     ];
     const fullText = sections.join('\n\n');
 
-    const parts = splitSupportAnswer(fullText, { thresholdChars: 400, maxChunkChars: 450, maxChunks: 5 });
+    const parts = splitSupportAnswer(fullText, {
+      thresholdChars: 400,
+      maxChunkChars: 450,
+      maxChunks: 5,
+    });
     expect(parts.length).toBeGreaterThanOrEqual(2);
 
-    const headings = ['دوره جامع آنلاین', 'دوره جامع آفلاین', 'جزوه', 'شرایط مشترک', 'پرداخت و ثبت نام'];
+    const headings = [
+      'دوره جامع آنلاین',
+      'دوره جامع آفلاین',
+      'جزوه',
+      'شرایط مشترک',
+      'پرداخت و ثبت نام',
+    ];
 
     // Verify NO part ends with any heading
     for (const part of parts) {
@@ -160,7 +173,9 @@ describe('stripHtml', () => {
 describe('isTelegramEntityParseError', () => {
   it('identifies entity parse errors correctly', () => {
     expect(isTelegramEntityParseError(new Error("Bad Request: can't parse entities"))).toBe(true);
-    expect(isTelegramEntityParseError({ message: 'Telegram API 400: ENTITY_PARSE_FAILED' })).toBe(true);
+    expect(isTelegramEntityParseError({ message: 'Telegram API 400: ENTITY_PARSE_FAILED' })).toBe(
+      true,
+    );
     expect(isTelegramEntityParseError(new Error('Network timeout'))).toBe(false);
   });
 });

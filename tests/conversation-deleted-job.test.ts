@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { ConversationMode, MessageProcessingStatus, SenderType } from '@prisma/client';
+import { MessageProcessingStatus } from '@prisma/client';
 import { ConversationProcessor } from '../src/conversations/processor.js';
 import { BusinessUpdateIngestor } from '../src/telegram-business/ingest.js';
 import { silentLogger, testConfig } from './helpers.js';
@@ -7,7 +7,6 @@ import type { TelegramApi } from '../src/telegram-business/client.js';
 
 describe('Deleted and Empty Message Handling (Issue 2)', () => {
   it('ConversationProcessor cleans up orphan jobs for deleted/empty messages and returns 0 count', async () => {
-    const now = new Date();
     const mockPrisma = {
       conversationJob: {
         findMany: vi
@@ -38,13 +37,13 @@ describe('Deleted and Empty Message Handling (Issue 2)', () => {
     };
 
     const processor = new ConversationProcessor(
-      mockPrisma as any,
-      {} as any,
-      {} as any,
-      {} as any,
-      {} as any,
-      {} as any,
-      {} as any,
+      mockPrisma as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
       testConfig(),
       silentLogger,
     );
@@ -82,11 +81,13 @@ describe('Deleted and Empty Message Handling (Issue 2)', () => {
       processedTelegramUpdate: {
         create: vi.fn().mockResolvedValue({}),
       },
-      $transaction: vi.fn().mockImplementation(async (fn: any) => fn(mockPrisma)),
+      $transaction: vi
+        .fn()
+        .mockImplementation(async (fn: (tx: unknown) => unknown) => fn(mockPrisma)),
     };
 
     const ingestor = new BusinessUpdateIngestor(
-      mockPrisma as any,
+      mockPrisma as never,
       {} as TelegramApi,
       testConfig(),
       silentLogger,

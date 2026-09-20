@@ -45,12 +45,7 @@ describe('LongPollingRunner', () => {
 
     expect(handled).toHaveLength(1);
     // On the second call to getUpdates, offset must have advanced past both 101 and 102
-    expect(mockTelegram.getUpdates).toHaveBeenNthCalledWith(
-      2,
-      103,
-      ['business_message'],
-      25,
-    );
+    expect(mockTelegram.getUpdates).toHaveBeenNthCalledWith(2, 103, ['business_message'], 25);
   });
 
   it('backs off on errors without infinite tight loop and aborts cleanly', async () => {
@@ -70,7 +65,7 @@ describe('LongPollingRunner', () => {
     const runner = new LongPollingRunner(
       mockTelegram as TelegramApi,
       ['business_message'],
-      async () => {},
+      async () => undefined,
       silentLogger,
     );
 
@@ -92,14 +87,18 @@ describe('LongPollingRunner', () => {
         if (callCount >= 2) {
           abortController.abort();
         }
-        throw new AppError('Conflict: terminated by other getUpdates request', 'TELEGRAM_API_409', 409);
+        throw new AppError(
+          'Conflict: terminated by other getUpdates request',
+          'TELEGRAM_API_409',
+          409,
+        );
       }),
     };
 
     const runner = new LongPollingRunner(
       mockTelegram as TelegramApi,
       ['business_message'],
-      async () => {},
+      async () => undefined,
       silentLogger,
     );
 

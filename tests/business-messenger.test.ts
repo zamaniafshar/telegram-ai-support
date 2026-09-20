@@ -262,4 +262,3 @@ describe('business AI message formatting and splitting', () => {
     vi.useRealTimers();
   });
 });
-
