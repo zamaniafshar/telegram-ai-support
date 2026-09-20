@@ -42,6 +42,67 @@ describe('splitSupportAnswer', () => {
     expect(splitSupportAnswer('')).toEqual([]);
     expect(splitSupportAnswer('   ')).toEqual([]);
   });
+
+  it('splits by explicit ===SPLIT=== delimiter when present', () => {
+    const text = [
+      'برای کنکور ۱۴۰۶ دوره‌های جامع ارائه می‌شوند 🌱\n\n<b>دوره جامع آنلاین</b>\n• هزینه: ۶ میلیون تومان',
+      '===SPLIT===',
+      '<b>دوره جامع آفلاین</b>\n• هزینه: ۵.۵ میلیون تومان\n\n<b>جزوه</b>\n• دو جلدی رنگی: ۲.۵ میلیون',
+      '===SPLIT===',
+      '<b>اطلاعات پرداخت</b>\n• شماره کارت: <code>5041721240420480</code>',
+    ].join('\n\n');
+
+    const parts = splitSupportAnswer(text);
+    expect(parts).toHaveLength(3);
+    expect(parts[0]).toContain('دوره جامع آنلاین');
+    expect(parts[1]).toContain('دوره جامع آفلاین');
+    expect(parts[2]).toContain('اطلاعات پرداخت');
+  });
+
+  it('never orphans a heading at the end of a chunk without its content', () => {
+    const intro = 'برای کنکور ۱۴۰۶، دوره‌های جامع بیوشیمی دکتر رضویان به‌صورت آنلاین و آفلاین ارائه می‌شوند 🌱';
+    const heading = 'دوره جامع آنلاین';
+    const body = '• هزینه دوره: ۶٬۹۹۹٬۰۰۰ تومان.\n• هزینه با تخفیف پرداخت نقدی مدت محدود: ۵٬۹۹۹٬۰۰۰ تومان.\n• برگزاری در بستر کافه تدریس است و قابلیت بازپخش دارد.';
+    const combined = `${intro}\n\n${heading}\n\n${body}`;
+
+    // Under maxChunkChars where intro + heading would fit (~115 chars), but body does not fit
+    const parts = splitSupportAnswer(combined, { thresholdChars: 100, maxChunkChars: 130 });
+    expect(parts.length).toBe(2);
+    // Intro must be alone in part 0
+    expect(parts[0]).toBe(intro);
+    // Heading must be at the START of part 1, together with its body!
+    expect(parts[1].startsWith(heading)).toBe(true);
+    expect(parts[1]).toContain('هزینه دوره: ۶٬۹۹۹٬۰۰۰ تومان');
+  });
+
+  it('correctly splits long multi-section answer without orphan headings (screenshot scenario)', () => {
+    const sections = [
+      'برای کنکور ۱۴۰۶، دوره‌های جامع بیوشیمی دکتر رضویان به‌صورت آنلاین و آفلاین ارائه می‌شوند 🌱',
+      'دوره جامع آنلاین',
+      '• هزینه دوره: ۶٬۹۹۹٬۰۰۰ تومان.\n• هزینه با تخفیف پرداخت نقدی مدت محدود: ۵٬۹۹۹٬۰۰۰ تومان.\n• برگزاری در بستر کافه تدریس است و قابلیت بازپخش دارد.\n• فقط روی یک کامپیوتر با سیستم عامل ویندوز قابل استفاده است.',
+      'دوره جامع آفلاین',
+      '• هزینه دوره: ۵٬۵۰۰٬۰۰۰ تومان.\n• هزینه با تخفیف پرداخت نقدی مدت محدود: ۴٬۵۰۰٬۰۰۰ تومان.\n• دوره کاملاً ویدئویی است و در برنامه اسپات پلیر ارائه می‌شود.\n• لایسنس فقط روی یک دستگاه فعال می‌شود، گوشی یا کامپیوتر.\n• نسخه تحت وب ندارد.',
+      'جزوه',
+      '• جزوه دو جلدی رنگی: ۲٬۵۰۰٬۰۰۰ تومان.\n• جزوه دو جلدی سیاه و سفید: ۲٬۰۰۰٬۰۰۰ تومان.\n• جزوه چاپی است و با تیپاکس به‌صورت پس کرایه ارسال می‌شود.',
+      'شرایط مشترک',
+      '• هر دو دوره گروه پشتیبانی رفع اشکال دارند، دو روز در هفته.\n• پایان هر فصل آزمون کلاسی برگزار می‌شود.\n• تدریس بر اساس آخرین منابع اعلامی انجام می‌شود.\n• دسترسی تا روز کنکور کارشناسی ارشد ۱۴۰۶ برقرار است و پس از آن لایسنس منقضی می‌شود.\n• هزینه دوره‌های نکته و تست و همایش جداگانه است.',
+      'پرداخت و ثبت نام',
+      '• شماره کارت: 5041721240420480\n• بانک: قرض الحسنه رسالت\n• به نام: حماد رضویان',
+    ];
+    const fullText = sections.join('\n\n');
+
+    const parts = splitSupportAnswer(fullText, { thresholdChars: 400, maxChunkChars: 450, maxChunks: 5 });
+    expect(parts.length).toBeGreaterThanOrEqual(2);
+
+    const headings = ['دوره جامع آنلاین', 'دوره جامع آفلاین', 'جزوه', 'شرایط مشترک', 'پرداخت و ثبت نام'];
+
+    // Verify NO part ends with any heading
+    for (const part of parts) {
+      for (const h of headings) {
+        expect(part.trim().endsWith(h)).toBe(false);
+      }
+    }
+  });
 });
 
 describe('calculateTypingDelayMs', () => {

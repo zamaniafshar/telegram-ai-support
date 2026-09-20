@@ -70,27 +70,30 @@ export function AppShell() {
         <header className="topbar">
           <div className="topbar-brand">
             <strong>پنل مدیریت پشتیبانی</strong>
-            <small>{session.businesses.find((item) => item.id === businessId)?.name}</small>
           </div>
           <div className="topbar-actions">
-            <label className="sr-only" htmlFor="business-select">
-              کسب‌وکار
-            </label>
-            <select
-              id="business-select"
-              className="business-select"
-              value={businessId}
-              onChange={(event) => {
-                setBusinessId(event.target.value);
-                telegram?.HapticFeedback?.selectionChanged();
-              }}
-            >
-              {session.businesses.map((business) => (
-                <option key={business.id} value={business.id}>
-                  {business.name}
-                </option>
-              ))}
-            </select>
+            {session.businesses.length > 1 && (
+              <>
+                <label className="sr-only" htmlFor="business-select">
+                  کسب‌وکار
+                </label>
+                <select
+                  id="business-select"
+                  className="business-select"
+                  value={businessId}
+                  onChange={(event) => {
+                    setBusinessId(event.target.value);
+                    telegram?.HapticFeedback?.selectionChanged();
+                  }}
+                >
+                  {session.businesses.map((business) => (
+                    <option key={business.id} value={business.id}>
+                      {business.name}
+                    </option>
+                  ))}
+                </select>
+              </>
+            )}
             <button
               className="theme-toggle"
               type="button"

@@ -29,7 +29,7 @@ export function OverviewPage() {
     <QueryState pending={query.isPending} error={query.error}>
       {data && (
         <>
-          <PageHeader title="نمای کلی" subtitle={data.business.name} />
+          <PageHeader title="نمای کلی" subtitle="داشبورد عملیاتی و وضعیت سامانه" />
           <div className="metric-grid">
             <div className="metric">
               <span>◉</span>

@@ -10,7 +10,7 @@ const config = loadConfig();
 
 const businessId =
   process.env['SEED_BUSINESS_ACCOUNT_ID'] ?? deterministicUuid('default-business-account');
-const businessName = process.env['SEED_BUSINESS_ACCOUNT_NAME'] ?? 'Default Support Account';
+const businessName = process.env['SEED_BUSINESS_ACCOUNT_NAME'] ?? 'پشتیبانی';
 
 await prisma.$transaction(async (tx) => {
   const business = await tx.businessAccount.upsert({

@@ -11,6 +11,33 @@ export const answerDecisionSchema = z
   })
   .strict();
 
+export const LEADING_GREETINGS_PATTERN = new RegExp(
+  '^(?:(?:<[^>]+>)*\\s*(?:' +
+    [
+      'سلام(?:\\s+علیکم|\\s+و\\s+درود|\\s+و\\s+عرض\\s+ادب|\\s+خدمت\\s+شما|\\s+دوست\\s+عزیز)?',
+      'درود(?:\\s+بر\\s+شما)?',
+      'عرض\\s+(?:سلام|ادب|احترام)',
+      '(?:وقت|روز|صبح|عصر|شب)(?:تون|\\s+شما)?\\s+بخیر',
+      'خوش\\s+(?:اومدین|آمدم?ید)',
+      'hello(?:\\s+there)?',
+      'hi(?:\\s+there)?',
+      'hey(?:\\s+there)?',
+      'good\\s+(?:morning|afternoon|evening|day)',
+      'greetings',
+    ].join('|') +
+    ')(?![آ-یa-zA-Z0-9])[\\s،.!؟:\\-–—,🌱🌸🌹🙏💐🌿✨]*(?:<\\/[^>]+>)*[\\s،.!؟:\\-–—,🌱🌸🌹🙏💐🌿✨]*)+',
+  'iu',
+);
+
+export function stripRedundantGreeting(text: string): string {
+  const trimmed = text.trim();
+  const stripped = trimmed.replace(LEADING_GREETINGS_PATTERN, '').trim();
+  if (stripped.length > 0 && stripped !== trimmed) {
+    return stripped;
+  }
+  return trimmed;
+}
+
 export function plainTextSupportAnswer(text: string): string {
   return text
     .replace(/^#{1,6}[ \t]+/gmu, '')
