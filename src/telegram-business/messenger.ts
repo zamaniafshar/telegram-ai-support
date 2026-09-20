@@ -48,7 +48,10 @@ export class BusinessMessenger {
             businessConnectionId: connection.id,
           })
           .catch((error: unknown) => {
-            this.logger.debug({ err: error, conversationId }, 'inter-message typing indicator failed');
+            this.logger.debug(
+              { err: error, conversationId },
+              'inter-message typing indicator failed',
+            );
           });
 
         const delayMs = calculateTypingDelayMs(part.length);
@@ -144,7 +147,10 @@ export class BusinessMessenger {
       sourceMessageId,
       metadata: { persistedFromSendResponse: true, handoffAcknowledgement: true },
     });
-    this.logger.info({ conversationId, senderType: SenderType.SYSTEM }, 'handoff acknowledgement sent');
+    this.logger.info(
+      { conversationId, senderType: SenderType.SYSTEM },
+      'handoff acknowledgement sent',
+    );
   }
 
   async #validateAndGetContext(

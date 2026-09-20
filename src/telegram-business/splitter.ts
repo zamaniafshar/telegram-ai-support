@@ -121,7 +121,7 @@ export function isSectionHeading(text: string): boolean {
   if (/[:：]$/.test(clean)) return true;
 
   // Starts with bullet point or number: NOT a heading, it's a list item
-  if (/^[•\-\*▫️▪️\d+[\.\)]]/.test(clean)) return false;
+  if (/^(?:[-•*▫▪]|\d+[.)])/.test(clean)) return false;
 
   // Single line with no terminal sentence punctuation (. ! ? ؟)
   const isSingleLine = !clean.includes('\n');
@@ -145,6 +145,9 @@ function packChunks(
 
   for (let i = 0; i < units.length; i += 1) {
     const unit = units[i];
+    if (unit === undefined) {
+      continue;
+    }
     const nextUnit = units[i + 1];
 
     if (!currentChunk) {
