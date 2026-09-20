@@ -1,0 +1,253 @@
+import { z } from 'zod';
+export declare const businessConnectionSchema: z.ZodObject<{
+    id: z.ZodString;
+    user: z.ZodObject<{
+        id: z.ZodNumber;
+        is_bot: z.ZodBoolean;
+        first_name: z.ZodOptional<z.ZodString>;
+        last_name: z.ZodOptional<z.ZodString>;
+        username: z.ZodOptional<z.ZodString>;
+        language_code: z.ZodOptional<z.ZodString>;
+    }, z.core.$loose>;
+    user_chat_id: z.ZodNumber;
+    date: z.ZodNumber;
+    can_reply: z.ZodOptional<z.ZodBoolean>;
+    rights: z.ZodOptional<z.ZodObject<{
+        can_reply: z.ZodOptional<z.ZodBoolean>;
+        can_read_messages: z.ZodOptional<z.ZodBoolean>;
+        can_delete_sent_messages: z.ZodOptional<z.ZodBoolean>;
+        can_delete_all_messages: z.ZodOptional<z.ZodBoolean>;
+        can_edit_name: z.ZodOptional<z.ZodBoolean>;
+        can_edit_bio: z.ZodOptional<z.ZodBoolean>;
+        can_edit_profile_photo: z.ZodOptional<z.ZodBoolean>;
+        can_edit_username: z.ZodOptional<z.ZodBoolean>;
+        can_change_gift_settings: z.ZodOptional<z.ZodBoolean>;
+        can_view_gifts_and_stars: z.ZodOptional<z.ZodBoolean>;
+        can_convert_gifts_to_stars: z.ZodOptional<z.ZodBoolean>;
+        can_transfer_and_upgrade_gifts: z.ZodOptional<z.ZodBoolean>;
+        can_transfer_stars: z.ZodOptional<z.ZodBoolean>;
+        can_manage_stories: z.ZodOptional<z.ZodBoolean>;
+    }, z.core.$loose>>;
+    is_enabled: z.ZodBoolean;
+}, z.core.$loose>;
+export declare const telegramMessageSchema: z.ZodObject<{
+    message_id: z.ZodNumber;
+    date: z.ZodNumber;
+    chat: z.ZodObject<{
+        id: z.ZodNumber;
+        type: z.ZodEnum<{
+            private: "private";
+            group: "group";
+            supergroup: "supergroup";
+            channel: "channel";
+        }>;
+        first_name: z.ZodOptional<z.ZodString>;
+        last_name: z.ZodOptional<z.ZodString>;
+        username: z.ZodOptional<z.ZodString>;
+    }, z.core.$loose>;
+    from: z.ZodOptional<z.ZodObject<{
+        id: z.ZodNumber;
+        is_bot: z.ZodBoolean;
+        first_name: z.ZodOptional<z.ZodString>;
+        last_name: z.ZodOptional<z.ZodString>;
+        username: z.ZodOptional<z.ZodString>;
+        language_code: z.ZodOptional<z.ZodString>;
+    }, z.core.$loose>>;
+    sender_business_bot: z.ZodOptional<z.ZodObject<{
+        id: z.ZodNumber;
+        is_bot: z.ZodBoolean;
+        first_name: z.ZodOptional<z.ZodString>;
+        last_name: z.ZodOptional<z.ZodString>;
+        username: z.ZodOptional<z.ZodString>;
+        language_code: z.ZodOptional<z.ZodString>;
+    }, z.core.$loose>>;
+    business_connection_id: z.ZodOptional<z.ZodString>;
+    text: z.ZodOptional<z.ZodString>;
+    caption: z.ZodOptional<z.ZodString>;
+}, z.core.$loose>;
+export declare const telegramUpdateSchema: z.ZodObject<{
+    update_id: z.ZodNumber;
+    business_connection: z.ZodOptional<z.ZodObject<{
+        id: z.ZodString;
+        user: z.ZodObject<{
+            id: z.ZodNumber;
+            is_bot: z.ZodBoolean;
+            first_name: z.ZodOptional<z.ZodString>;
+            last_name: z.ZodOptional<z.ZodString>;
+            username: z.ZodOptional<z.ZodString>;
+            language_code: z.ZodOptional<z.ZodString>;
+        }, z.core.$loose>;
+        user_chat_id: z.ZodNumber;
+        date: z.ZodNumber;
+        can_reply: z.ZodOptional<z.ZodBoolean>;
+        rights: z.ZodOptional<z.ZodObject<{
+            can_reply: z.ZodOptional<z.ZodBoolean>;
+            can_read_messages: z.ZodOptional<z.ZodBoolean>;
+            can_delete_sent_messages: z.ZodOptional<z.ZodBoolean>;
+            can_delete_all_messages: z.ZodOptional<z.ZodBoolean>;
+            can_edit_name: z.ZodOptional<z.ZodBoolean>;
+            can_edit_bio: z.ZodOptional<z.ZodBoolean>;
+            can_edit_profile_photo: z.ZodOptional<z.ZodBoolean>;
+            can_edit_username: z.ZodOptional<z.ZodBoolean>;
+            can_change_gift_settings: z.ZodOptional<z.ZodBoolean>;
+            can_view_gifts_and_stars: z.ZodOptional<z.ZodBoolean>;
+            can_convert_gifts_to_stars: z.ZodOptional<z.ZodBoolean>;
+            can_transfer_and_upgrade_gifts: z.ZodOptional<z.ZodBoolean>;
+            can_transfer_stars: z.ZodOptional<z.ZodBoolean>;
+            can_manage_stories: z.ZodOptional<z.ZodBoolean>;
+        }, z.core.$loose>>;
+        is_enabled: z.ZodBoolean;
+    }, z.core.$loose>>;
+    business_message: z.ZodOptional<z.ZodObject<{
+        message_id: z.ZodNumber;
+        date: z.ZodNumber;
+        chat: z.ZodObject<{
+            id: z.ZodNumber;
+            type: z.ZodEnum<{
+                private: "private";
+                group: "group";
+                supergroup: "supergroup";
+                channel: "channel";
+            }>;
+            first_name: z.ZodOptional<z.ZodString>;
+            last_name: z.ZodOptional<z.ZodString>;
+            username: z.ZodOptional<z.ZodString>;
+        }, z.core.$loose>;
+        from: z.ZodOptional<z.ZodObject<{
+            id: z.ZodNumber;
+            is_bot: z.ZodBoolean;
+            first_name: z.ZodOptional<z.ZodString>;
+            last_name: z.ZodOptional<z.ZodString>;
+            username: z.ZodOptional<z.ZodString>;
+            language_code: z.ZodOptional<z.ZodString>;
+        }, z.core.$loose>>;
+        sender_business_bot: z.ZodOptional<z.ZodObject<{
+            id: z.ZodNumber;
+            is_bot: z.ZodBoolean;
+            first_name: z.ZodOptional<z.ZodString>;
+            last_name: z.ZodOptional<z.ZodString>;
+            username: z.ZodOptional<z.ZodString>;
+            language_code: z.ZodOptional<z.ZodString>;
+        }, z.core.$loose>>;
+        business_connection_id: z.ZodOptional<z.ZodString>;
+        text: z.ZodOptional<z.ZodString>;
+        caption: z.ZodOptional<z.ZodString>;
+    }, z.core.$loose>>;
+    edited_business_message: z.ZodOptional<z.ZodObject<{
+        message_id: z.ZodNumber;
+        date: z.ZodNumber;
+        chat: z.ZodObject<{
+            id: z.ZodNumber;
+            type: z.ZodEnum<{
+                private: "private";
+                group: "group";
+                supergroup: "supergroup";
+                channel: "channel";
+            }>;
+            first_name: z.ZodOptional<z.ZodString>;
+            last_name: z.ZodOptional<z.ZodString>;
+            username: z.ZodOptional<z.ZodString>;
+        }, z.core.$loose>;
+        from: z.ZodOptional<z.ZodObject<{
+            id: z.ZodNumber;
+            is_bot: z.ZodBoolean;
+            first_name: z.ZodOptional<z.ZodString>;
+            last_name: z.ZodOptional<z.ZodString>;
+            username: z.ZodOptional<z.ZodString>;
+            language_code: z.ZodOptional<z.ZodString>;
+        }, z.core.$loose>>;
+        sender_business_bot: z.ZodOptional<z.ZodObject<{
+            id: z.ZodNumber;
+            is_bot: z.ZodBoolean;
+            first_name: z.ZodOptional<z.ZodString>;
+            last_name: z.ZodOptional<z.ZodString>;
+            username: z.ZodOptional<z.ZodString>;
+            language_code: z.ZodOptional<z.ZodString>;
+        }, z.core.$loose>>;
+        business_connection_id: z.ZodOptional<z.ZodString>;
+        text: z.ZodOptional<z.ZodString>;
+        caption: z.ZodOptional<z.ZodString>;
+    }, z.core.$loose>>;
+    deleted_business_messages: z.ZodOptional<z.ZodObject<{
+        business_connection_id: z.ZodString;
+        chat: z.ZodObject<{
+            id: z.ZodNumber;
+            type: z.ZodEnum<{
+                private: "private";
+                group: "group";
+                supergroup: "supergroup";
+                channel: "channel";
+            }>;
+            first_name: z.ZodOptional<z.ZodString>;
+            last_name: z.ZodOptional<z.ZodString>;
+            username: z.ZodOptional<z.ZodString>;
+        }, z.core.$loose>;
+        message_ids: z.ZodArray<z.ZodNumber>;
+    }, z.core.$loose>>;
+    message: z.ZodOptional<z.ZodObject<{
+        message_id: z.ZodNumber;
+        date: z.ZodNumber;
+        chat: z.ZodObject<{
+            id: z.ZodNumber;
+            type: z.ZodEnum<{
+                private: "private";
+                group: "group";
+                supergroup: "supergroup";
+                channel: "channel";
+            }>;
+            first_name: z.ZodOptional<z.ZodString>;
+            last_name: z.ZodOptional<z.ZodString>;
+            username: z.ZodOptional<z.ZodString>;
+        }, z.core.$loose>;
+        from: z.ZodOptional<z.ZodObject<{
+            id: z.ZodNumber;
+            is_bot: z.ZodBoolean;
+            first_name: z.ZodOptional<z.ZodString>;
+            last_name: z.ZodOptional<z.ZodString>;
+            username: z.ZodOptional<z.ZodString>;
+            language_code: z.ZodOptional<z.ZodString>;
+        }, z.core.$loose>>;
+        sender_business_bot: z.ZodOptional<z.ZodObject<{
+            id: z.ZodNumber;
+            is_bot: z.ZodBoolean;
+            first_name: z.ZodOptional<z.ZodString>;
+            last_name: z.ZodOptional<z.ZodString>;
+            username: z.ZodOptional<z.ZodString>;
+            language_code: z.ZodOptional<z.ZodString>;
+        }, z.core.$loose>>;
+        business_connection_id: z.ZodOptional<z.ZodString>;
+        text: z.ZodOptional<z.ZodString>;
+        caption: z.ZodOptional<z.ZodString>;
+    }, z.core.$loose>>;
+}, z.core.$loose>;
+export type TelegramUpdate = z.infer<typeof telegramUpdateSchema>;
+export type TelegramMessage = z.infer<typeof telegramMessageSchema>;
+export type BusinessConnectionUpdate = z.infer<typeof businessConnectionSchema>;
+export declare function businessCanReply(connection: BusinessConnectionUpdate): boolean;
+export declare function businessCanReadMessages(connection: BusinessConnectionUpdate): boolean;
+export interface InlineKeyboardButton {
+    text: string;
+    web_app: {
+        url: string;
+    };
+}
+export interface InlineKeyboardMarkup {
+    inline_keyboard: InlineKeyboardButton[][];
+}
+export interface SentTelegramMessage {
+    message_id: number;
+    date: number;
+    chat: {
+        id: number;
+        type: string;
+    };
+    text?: string;
+    business_connection_id?: string;
+}
+export interface TelegramWebhookInfo {
+    url: string;
+    has_custom_certificate: boolean;
+    pending_update_count: number;
+    last_error_date?: number;
+    last_error_message?: string;
+}

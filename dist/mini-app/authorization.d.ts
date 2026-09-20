@@ -1,0 +1,21 @@
+import { AdminRole } from '@prisma/client';
+import type { MiniAppSessionContext } from './auth.js';
+export declare function requireRole(context: MiniAppSessionContext, minimum: AdminRole): void;
+export declare function requireOwner(context: MiniAppSessionContext): void;
+export declare function requireBusiness(context: MiniAppSessionContext, businessAccountId: string): {
+    name: string;
+    id: string;
+    telegramAccountUserId: bigint | null;
+    defaultLocale: string;
+    isActive: boolean;
+    createdAt: Date;
+    updatedAt: Date;
+    aiProcessingLeaseOwner: string | null;
+    aiProcessingLeaseExpiresAt: Date | null;
+    aiHourlyWindowStartedAt: Date | null;
+    aiHourlyRequestCount: number;
+    aiDailyWindowStartedAt: Date | null;
+    aiDailyRequestCount: number;
+    aiBlockedUntil: Date | null;
+};
+export declare function capabilities(context: MiniAppSessionContext): string[];
