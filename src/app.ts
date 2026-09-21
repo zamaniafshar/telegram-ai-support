@@ -14,6 +14,7 @@ import { ConversationProcessor } from './conversations/processor.js';
 import { KnowledgeService } from './knowledge/service.js';
 import { AdminAuthorizer } from './security/admin-authorization.js';
 import { HealthService } from './observability/health.js';
+import { SystemLogger } from './observability/system-logger.js';
 import { BusinessUpdateIngestor } from './telegram-business/ingest.js';
 import { AdminBotHandler } from './telegram-admin/handler.js';
 import { WorkerRunner } from './workers/runner.js';
@@ -24,6 +25,7 @@ import { AiAvailabilityService } from './ai/availability.js';
 
 export function createServices(config: AppConfig, logger: Logger, prisma?: PrismaClient) {
   const database = prisma ?? createPrismaClient();
+  const systemLogger = new SystemLogger(database as unknown as never, logger, config);
   const businessTelegram = new TelegramBotApiClient(config.telegram.businessBotToken);
   const adminTelegram = new TelegramBotApiClient(config.telegram.adminBotToken);
   const notifier = new AdminNotifier(database, adminTelegram, config, logger);
@@ -40,7 +42,7 @@ export function createServices(config: AppConfig, logger: Logger, prisma?: Prism
   const retrieval = new RetrievalService(database, openai, vectors, config);
   const handoffs = new HandoffService(database, config, logger, notifier);
   const indexing = new IndexingService(database, openai, vectors, config, logger, notifier);
-  const messenger = new BusinessMessenger(database, businessTelegram, config, logger);
+  const messenger = new BusinessMessenger(database, businessTelegram, config, logger, systemLogger);
   const aiAvailability = new AiAvailabilityService(database, config.business.defaultTimezone);
   const conversations = new ConversationProcessor(
     database,
@@ -52,6 +54,7 @@ export function createServices(config: AppConfig, logger: Logger, prisma?: Prism
     aiAvailability,
     config,
     logger,
+    systemLogger,
   );
   const knowledge = new KnowledgeService(database, config);
   const authorizer = new AdminAuthorizer(database);
@@ -65,6 +68,7 @@ export function createServices(config: AppConfig, logger: Logger, prisma?: Prism
     config,
     aiAvailability,
     notifier,
+    systemLogger,
   );
   const businessIngestor = new BusinessUpdateIngestor(database, businessTelegram, config, logger);
   const adminHandler = new AdminBotHandler(
@@ -81,6 +85,7 @@ export function createServices(config: AppConfig, logger: Logger, prisma?: Prism
     notifier,
     config,
     logger,
+    systemLogger,
   );
   return {
     prisma: database,
@@ -105,6 +110,7 @@ export function createServices(config: AppConfig, logger: Logger, prisma?: Prism
     businessIngestor,
     adminHandler,
     worker,
+    systemLogger,
   };
 }
 

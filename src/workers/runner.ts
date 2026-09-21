@@ -7,6 +7,7 @@ import type { ConversationProcessor } from '../conversations/processor.js';
 import type { HandoffService } from '../handoffs/service.js';
 import type { NanoGptCreditMonitor } from '../ai/nanogpt-credit.js';
 import type { AdminNotifier } from '../telegram-admin/notifier.js';
+import type { SystemLogger } from '../observability/system-logger.js';
 
 export class WorkerRunner {
   readonly workerId = `worker:${randomUUID()}`;
@@ -19,6 +20,7 @@ export class WorkerRunner {
     private readonly notifications: AdminNotifier,
     private readonly config: AppConfig,
     private readonly logger: Logger,
+    private readonly systemLogger?: SystemLogger,
   ) {}
 
   async run(signal: AbortSignal): Promise<void> {
@@ -40,8 +42,16 @@ export class WorkerRunner {
           await delay(50, undefined, { signal }).catch(() => undefined);
           continue;
         }
+        await this.systemLogger?.pruneIfDue();
       } catch (error) {
         this.logger.error({ err: error, workerId: this.workerId }, 'worker cycle failed');
+        this.systemLogger?.error({
+          category: 'WORKER',
+          message: `worker cycle failed: ${error instanceof Error ? error.message : String(error)}`,
+          messageFa: 'پردازش پس‌زمینه با خطا مواجه شد',
+          errorCode: 'WORKER_FAILED',
+          metadata: { workerId: this.workerId, error: error instanceof Error ? error.message : String(error) },
+        });
       }
       await delay(this.config.worker.pollIntervalMs, undefined, { signal }).catch(() => undefined);
     }

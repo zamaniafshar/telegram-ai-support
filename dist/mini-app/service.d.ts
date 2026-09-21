@@ -6,6 +6,7 @@ import type { HealthService } from '../observability/health.js';
 import type { MiniAppSessionContext } from './auth.js';
 import { type AiAvailabilityService, type WeeklySchedule, type QueuePolicy } from '../ai/availability.js';
 import type { AdminNotifier } from '../telegram-admin/notifier.js';
+import type { SystemLogger } from '../observability/system-logger.js';
 export declare class MiniAppManagementService {
     #private;
     private readonly prisma;
@@ -15,7 +16,8 @@ export declare class MiniAppManagementService {
     private readonly config;
     private readonly availability?;
     private readonly notifier?;
-    constructor(prisma: PrismaClient, knowledge: KnowledgeService, handoffs: HandoffService, health: HealthService, config: AppConfig, availability?: AiAvailabilityService | undefined, notifier?: AdminNotifier | undefined);
+    private readonly systemLogger?;
+    constructor(prisma: PrismaClient, knowledge: KnowledgeService, handoffs: HandoffService, health: HealthService, config: AppConfig, availability?: AiAvailabilityService | undefined, notifier?: AdminNotifier | undefined, systemLogger?: SystemLogger | undefined);
     businesses(context: MiniAppSessionContext): {
         id: string;
         name: string;
@@ -660,4 +662,44 @@ export declare class MiniAppManagementService {
         outcome: string;
         note?: string | undefined;
     }): Promise<void>;
+    systemLogs(context: MiniAppSessionContext, businessAccountId: string, filters: {
+        level?: string | undefined;
+        category?: string | undefined;
+        search?: string | undefined;
+        from?: string | undefined;
+        to?: string | undefined;
+        page?: string | undefined;
+        pageSize?: string | undefined;
+        errorCode?: string | undefined;
+    }): Promise<{
+        items: unknown[];
+        total: number;
+        page: number;
+        pageSize: number;
+        totalPages: number;
+    }>;
+    systemLogDetail(context: MiniAppSessionContext, businessAccountId: string, id: string): Promise<{}>;
+    diagnostics(context: MiniAppSessionContext, businessAccountId: string): Promise<{
+        health: import("../observability/health.js").ReadinessReport;
+        queues: {
+            indexing: (Prisma.PickEnumerable<Prisma.IndexingJobGroupByOutputType, "status"[]> & {
+                _count: number;
+            })[];
+            conversations: (Prisma.PickEnumerable<Prisma.ConversationJobGroupByOutputType, "status"[]> & {
+                _count: number;
+            })[];
+        } | undefined;
+        logs: {
+            byLevel: Record<string, number>;
+            byCategory: Record<string, number>;
+            topErrors: {
+                errorCode: string;
+                count: number;
+                messageFa: string;
+                fix?: string | undefined;
+            }[];
+            recentErrors: unknown[];
+        } | null;
+        generatedAt: string;
+    }>;
 }

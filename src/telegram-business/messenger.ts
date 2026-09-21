@@ -13,6 +13,7 @@ import type { SentTelegramMessage } from './types.js';
 import { AppError } from '../utils/errors.js';
 import { newId, telegramId } from '../utils/ids.js';
 import { calculateTypingDelayMs, splitSupportAnswer } from './splitter.js';
+import type { SystemLogger } from '../observability/system-logger.js';
 import {
   isTelegramEntityParseError,
   sanitizeTelegramHtml,
@@ -27,6 +28,7 @@ export class BusinessMessenger {
     private readonly telegram: TelegramApi,
     private readonly config: AppConfig,
     private readonly logger: Logger,
+    private readonly systemLogger?: SystemLogger,
   ) {}
 
   async sendAiAnswer(conversationId: string, text: string, sourceMessageId: string): Promise<void> {
@@ -226,6 +228,15 @@ export class BusinessMessenger {
         parseMode: 'HTML',
       });
     } catch (error) {
+      const code = error instanceof AppError ? error.code : 'TELEGRAM_SEND_FAILED';
+      const isWindow = code === 'TELEGRAM_REPLY_WINDOW_EXPIRED';
+      this.systemLogger?.[isWindow ? 'warn' : 'error']({
+        category: 'TELEGRAM',
+        message: `sendMessage failed: ${code} ${error instanceof Error ? error.message : String(error)}`,
+        messageFa: isWindow ? 'پنجره پاسخ تلگرام منقضی شده' : 'ارسال پیام به تلگرام ناموفق بود',
+        errorCode: code ?? 'TELEGRAM_SEND_FAILED',
+        metadata: { conversationId: options.conversationId, error: error instanceof Error ? error.message : String(error) },
+      });
       if (isTelegramEntityParseError(error)) {
         this.logger.warn(
           { conversationId: options.conversationId, err: error },

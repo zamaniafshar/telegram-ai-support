@@ -24,6 +24,8 @@ export function AppShell() {
     ...(hasCapability('knowledge:manage') ? [['/knowledge', '▤', 'مدیریت دانش'] as const] : []),
     ['/connections', '⌁', 'اتصال تجاری'] as const,
     ['/system', '♡', 'سلامت سامانه'] as const,
+    ...(hasCapability('diagnostics:read') ? [['/diagnostics', '≡', 'عیب‌یابی'] as const] : []),
+    ...(hasCapability('diagnostics:read') ? [['/logs', '≡', 'لاگ‌ها'] as const] : []),
     ...(hasCapability('admin:manage') ? [['/admins', '♙', 'مدیران'] as const] : []),
     ...(hasCapability('audit:read') ? [['/audit', '◷', 'فعالیت‌ها'] as const] : []),
     ['/notifications', '♢', 'اعلان‌ها'] as const,

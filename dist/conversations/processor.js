@@ -22,8 +22,9 @@ export class ConversationProcessor {
     availability;
     config;
     logger;
+    systemLogger;
     lastRetentionRunAt = 0;
-    constructor(prisma, retrieval, answerer, handoffs, messenger, notifier, availability, config, logger) {
+    constructor(prisma, retrieval, answerer, handoffs, messenger, notifier, availability, config, logger, systemLogger) {
         this.prisma = prisma;
         this.retrieval = retrieval;
         this.answerer = answerer;
@@ -33,6 +34,7 @@ export class ConversationProcessor {
         this.availability = availability;
         this.config = config;
         this.logger = logger;
+        this.systemLogger = systemLogger;
     }
     async runBatch(workerId) {
         await this.#pruneExpiredTraces();
@@ -736,6 +738,13 @@ export class ConversationProcessor {
         const attempts = Math.max(...jobs.map((job) => job.attempts));
         const maxAttempts = Math.min(...jobs.map((job) => job.maxAttempts));
         this.logger.error({ err: error, conversationId, attempts }, 'conversation batch failed');
+        this.systemLogger?.error({
+            category: 'AI',
+            message: `conversation batch failed: ${code}`,
+            messageFa: 'پردازش گفتگو با خطا مواجه شد',
+            errorCode: code,
+            metadata: { conversationId, attempts, maxAttempts, error: error instanceof Error ? error.message : String(error) },
+        });
         if (!shouldHandoffExternalFailure(attempts, maxAttempts)) {
             await this.#updateTrace(firstJob.messageId, { errorCode: code });
             await this.prisma.conversationJob.updateMany({

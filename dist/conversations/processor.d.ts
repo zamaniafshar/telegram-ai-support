@@ -7,6 +7,7 @@ import type { HandoffService } from '../handoffs/service.js';
 import type { BusinessMessenger } from '../telegram-business/messenger.js';
 import type { AdminNotifier } from '../telegram-admin/notifier.js';
 import type { AiAvailabilityService } from '../ai/availability.js';
+import type { SystemLogger } from '../observability/system-logger.js';
 export declare class ConversationProcessor {
     #private;
     private readonly prisma;
@@ -18,7 +19,8 @@ export declare class ConversationProcessor {
     private readonly availability;
     private readonly config;
     private readonly logger;
+    private readonly systemLogger?;
     private lastRetentionRunAt;
-    constructor(prisma: PrismaClient, retrieval: RetrievalService, answerer: GroundedAnswerer, handoffs: HandoffService, messenger: BusinessMessenger, notifier: AdminNotifier, availability: AiAvailabilityService, config: AppConfig, logger: Logger);
+    constructor(prisma: PrismaClient, retrieval: RetrievalService, answerer: GroundedAnswerer, handoffs: HandoffService, messenger: BusinessMessenger, notifier: AdminNotifier, availability: AiAvailabilityService, config: AppConfig, logger: Logger, systemLogger?: SystemLogger | undefined);
     runBatch(workerId: string): Promise<number>;
 }

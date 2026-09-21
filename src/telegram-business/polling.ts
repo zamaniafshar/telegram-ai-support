@@ -2,6 +2,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 import type { Logger } from 'pino';
 import { AppError } from '../utils/errors.js';
 import type { TelegramApi } from './client.js';
+import type { SystemLogger } from '../observability/system-logger.js';
 import { telegramUpdateSchema, type TelegramUpdate } from './types.js';
 
 const MIN_ERROR_DELAY_MS = 2_000;
@@ -18,6 +19,7 @@ export class LongPollingRunner {
     private readonly allowedUpdates: string[],
     private readonly handler: (update: TelegramUpdate) => Promise<void>,
     private readonly logger: Logger,
+    private readonly systemLogger?: SystemLogger,
   ) {}
 
   async run(signal: AbortSignal): Promise<void> {
@@ -81,6 +83,13 @@ export class LongPollingRunner {
             ? 'long polling conflict detected: check for duplicate bot instances or active webhooks'
             : 'long polling cycle failed, backing off before retry',
         );
+        this.systemLogger?.error({
+          category: 'TELEGRAM',
+          message: isConflict ? 'long polling conflict detected' : 'long polling cycle failed',
+          messageFa: isConflict ? 'دو نمونه ربات همزمان اجرا شده' : 'دریافت پیام از تلگرام با خطا مواجه شد',
+          errorCode: isConflict ? 'POLLING_CONFLICT' : 'TELEGRAM_NETWORK_ERROR',
+          metadata: { isConflict, consecutiveErrors, backoffMs, error: error instanceof Error ? error.message : String(error) },
+        });
 
         await delay(backoffMs, undefined, { signal }).catch(() => undefined);
       }

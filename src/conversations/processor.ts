@@ -26,6 +26,7 @@ import type {
   QueuePolicy,
 } from '../ai/availability.js';
 import { redactTraceText, traceExpiry } from '../observability/trace-safety.js';
+import type { SystemLogger } from '../observability/system-logger.js';
 
 const runnable = [
   MessageProcessingStatus.PENDING,
@@ -49,6 +50,7 @@ export class ConversationProcessor {
     private readonly availability: AiAvailabilityService,
     private readonly config: AppConfig,
     private readonly logger: Logger,
+    private readonly systemLogger?: SystemLogger,
   ) {}
 
   async runBatch(workerId: string): Promise<number> {
@@ -976,6 +978,13 @@ export class ConversationProcessor {
     const attempts = Math.max(...jobs.map((job) => job.attempts));
     const maxAttempts = Math.min(...jobs.map((job) => job.maxAttempts));
     this.logger.error({ err: error, conversationId, attempts }, 'conversation batch failed');
+    this.systemLogger?.error({
+      category: 'AI',
+      message: `conversation batch failed: ${code}`,
+      messageFa: 'پردازش گفتگو با خطا مواجه شد',
+      errorCode: code,
+      metadata: { conversationId, attempts, maxAttempts, error: error instanceof Error ? error.message : String(error) },
+    });
     if (!shouldHandoffExternalFailure(attempts, maxAttempts)) {
       await this.#updateTrace(firstJob.messageId, { errorCode: code });
       await this.prisma.conversationJob.updateMany({

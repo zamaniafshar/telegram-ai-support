@@ -37,6 +37,7 @@ if (config.telegram.transport === 'polling') {
       await services.businessIngestor.ingest(update, randomUUID());
     },
     logger,
+    services.systemLogger,
   );
   const adminPolling = new LongPollingRunner(
     services.adminTelegram,
@@ -45,6 +46,7 @@ if (config.telegram.transport === 'polling') {
       await services.adminHandler.handle(update, randomUUID());
     },
     logger,
+    services.systemLogger,
   );
   backgroundTasks.push(
     businessPolling.run(abortController.signal),

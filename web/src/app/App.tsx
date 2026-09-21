@@ -16,6 +16,8 @@ import {
 import { AdminsPage, AuditPage, MorePage, NotificationsPage } from '../features/admin/AdminPages';
 import { EmptyState } from '../components/ui';
 import { AnalyticsPage, AnalyticsTracePage } from '../features/analytics/AnalyticsPages';
+import { DiagnosticsPage } from '../features/diagnostics/DiagnosticsPage';
+import { LogsPage } from '../features/diagnostics/LogsPage';
 import { ConfirmationProvider } from './ConfirmationProvider';
 
 const queryClient = new QueryClient({
@@ -114,6 +116,8 @@ export function App() {
                   />
                   <Route path="connections" element={<ConnectionsPage />} />
                   <Route path="system" element={<SystemPage />} />
+                  <Route path="diagnostics" element={<CapabilityRoute capability="diagnostics:read"><DiagnosticsPage /></CapabilityRoute>} />
+                  <Route path="logs" element={<CapabilityRoute capability="diagnostics:read"><LogsPage /></CapabilityRoute>} />
                   <Route
                     path="admins"
                     element={

@@ -99,4 +99,10 @@ export declare function loadConfig(source?: NodeJS.ProcessEnv): {
         readonly indexingBackoffBaseMs: number;
         readonly runInApi: boolean;
     };
+    readonly systemLog: {
+        readonly enabled: boolean;
+        readonly dbLevel: "error" | "fatal" | "warn" | "info" | "debug" | "trace" | "silent";
+        readonly retentionDays: number;
+        readonly dedupMs: number;
+    };
 };

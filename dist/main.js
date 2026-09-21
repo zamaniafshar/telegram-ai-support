@@ -27,10 +27,10 @@ if (config.telegram.transport === 'polling') {
         'deleted_business_messages',
     ], async (update) => {
         await services.businessIngestor.ingest(update, randomUUID());
-    }, logger);
+    }, logger, services.systemLogger);
     const adminPolling = new LongPollingRunner(services.adminTelegram, ['message'], async (update) => {
         await services.adminHandler.handle(update, randomUUID());
-    }, logger);
+    }, logger, services.systemLogger);
     backgroundTasks.push(businessPolling.run(abortController.signal), adminPolling.run(abortController.signal));
 }
 await app.listen({ host: config.http.host, port: config.http.port });

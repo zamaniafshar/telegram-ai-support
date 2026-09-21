@@ -111,6 +111,11 @@ const envSchema = z.object({
   AI_OUTPUT_COST_PER_MILLION_USD: z.coerce.number().nonnegative().optional(),
   RUN_WORKERS_IN_API: booleanString,
 
+  SYSTEM_LOG_ENABLED: z.enum(['true', 'false']).default('true').transform((v) => v === 'true'),
+  SYSTEM_LOG_DB_LEVEL: z.enum(['trace', 'debug', 'info', 'warn', 'error', 'fatal', 'silent']).default('warn'),
+  SYSTEM_LOG_RETENTION_DAYS: z.coerce.number().int().min(1).max(3650).default(30),
+  SYSTEM_LOG_DEDUP_MS: z.coerce.number().int().min(0).max(3_600_000).default(300_000),
+
   TRUST_PROXY: booleanString,
   WEBHOOK_RATE_LIMIT_MAX: positiveInt(300),
   WEBHOOK_RATE_LIMIT_WINDOW: z.string().default('1 minute'),
@@ -254,6 +259,12 @@ export function loadConfig(source: NodeJS.ProcessEnv = process.env) {
       indexingMaxAttempts: env.INDEXING_MAX_ATTEMPTS,
       indexingBackoffBaseMs: env.INDEXING_BACKOFF_BASE_MS,
       runInApi: env.RUN_WORKERS_IN_API,
+    },
+    systemLog: {
+      enabled: env.SYSTEM_LOG_ENABLED,
+      dbLevel: env.SYSTEM_LOG_DB_LEVEL,
+      retentionDays: env.SYSTEM_LOG_RETENTION_DAYS,
+      dedupMs: env.SYSTEM_LOG_DEDUP_MS,
     },
   } as const;
 }

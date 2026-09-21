@@ -13,6 +13,7 @@ import { ConversationProcessor } from './conversations/processor.js';
 import { KnowledgeService } from './knowledge/service.js';
 import { AdminAuthorizer } from './security/admin-authorization.js';
 import { HealthService } from './observability/health.js';
+import { SystemLogger } from './observability/system-logger.js';
 import { BusinessUpdateIngestor } from './telegram-business/ingest.js';
 import { AdminBotHandler } from './telegram-admin/handler.js';
 import { WorkerRunner } from './workers/runner.js';
@@ -43,5 +44,6 @@ export declare function createServices(config: AppConfig, logger: Logger, prisma
     businessIngestor: BusinessUpdateIngestor;
     adminHandler: AdminBotHandler;
     worker: WorkerRunner;
+    systemLogger: SystemLogger;
 };
 export type Services = ReturnType<typeof createServices>;

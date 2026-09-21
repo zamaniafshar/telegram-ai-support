@@ -23,7 +23,8 @@ export class MiniAppManagementService {
     config;
     availability;
     notifier;
-    constructor(prisma, knowledge, handoffs, health, config, availability, notifier) {
+    systemLogger;
+    constructor(prisma, knowledge, handoffs, health, config, availability, notifier, systemLogger) {
         this.prisma = prisma;
         this.knowledge = knowledge;
         this.handoffs = handoffs;
@@ -31,6 +32,7 @@ export class MiniAppManagementService {
         this.config = config;
         this.availability = availability;
         this.notifier = notifier;
+        this.systemLogger = systemLogger;
     }
     businesses(context) {
         return context.businessAccess
@@ -1166,6 +1168,64 @@ export class MiniAppManagementService {
             throw new ValidationError('Resolution note is too long', 'INVALID_RESOLUTION_NOTE');
         }
         await this.handoffs.resolve(businessAccountId, conversationId, context.admin, input.outcome, input.note);
+    }
+    async systemLogs(context, businessAccountId, filters) {
+        requireBusiness(context, businessAccountId);
+        requireRole(context, AdminRole.ADMIN);
+        if (!this.systemLogger)
+            throw new ResourceUnavailableError();
+        const levels = ['TRACE', 'DEBUG', 'INFO', 'WARN', 'ERROR', 'FATAL'];
+        const cats = ['WEBHOOK', 'TELEGRAM', 'AI', 'RETRIEVAL', 'INDEXING', 'QDRANT', 'WORKER', 'HANDOFF', 'AUTH', 'SYSTEM', 'CREDIT', 'DATABASE', 'HTTP'];
+        const level = levels.find((v) => v === filters.level?.toUpperCase()) ?? null;
+        const category = cats.find((v) => v === filters.category?.toUpperCase()) ?? null;
+        const page = filters.page ? Math.max(1, Number(filters.page) || 1) : 1;
+        const pageSize = filters.pageSize ? Math.min(100, Math.max(1, Number(filters.pageSize) || 20)) : 20;
+        const from = filters.from ? new Date(filters.from) : null;
+        const to = filters.to ? new Date(filters.to) : null;
+        return this.systemLogger.list({
+            businessAccountId,
+            level,
+            category,
+            errorCode: filters.errorCode ?? null,
+            search: filters.search ?? null,
+            from: from && !Number.isNaN(from.getTime()) ? from : null,
+            to: to && !Number.isNaN(to.getTime()) ? to : null,
+            page,
+            pageSize,
+        });
+    }
+    async systemLogDetail(context, businessAccountId, id) {
+        requireBusiness(context, businessAccountId);
+        requireRole(context, AdminRole.ADMIN);
+        if (!this.systemLogger)
+            throw new ResourceUnavailableError();
+        const item = await this.systemLogger.get(id);
+        if (!item)
+            throw new ResourceUnavailableError();
+        const row = item;
+        if (row.businessAccountId && row.businessAccountId !== businessAccountId)
+            throw new ResourceUnavailableError();
+        return item;
+    }
+    async diagnostics(context, businessAccountId) {
+        requireBusiness(context, businessAccountId);
+        const showDiag = context.admin.role !== AdminRole.SUPPORT;
+        const [health, logs] = await Promise.all([
+            this.health.readiness(),
+            showDiag && this.systemLogger ? this.systemLogger.summary({ businessAccountId, sinceHours: 24 }) : Promise.resolve(null),
+        ]);
+        const queues = showDiag
+            ? await Promise.all([
+                this.prisma.indexingJob.groupBy({ by: ['status'], where: { knowledgeItem: { businessAccountId } }, _count: true }),
+                this.prisma.conversationJob.groupBy({ by: ['status'], where: { message: { conversation: { businessAccountId } } }, _count: true }),
+            ])
+            : null;
+        return {
+            health,
+            queues: queues ? { indexing: queues[0], conversations: queues[1] } : undefined,
+            logs,
+            generatedAt: new Date().toISOString(),
+        };
     }
 }
 //# sourceMappingURL=service.js.map

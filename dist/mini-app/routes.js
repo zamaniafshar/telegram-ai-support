@@ -354,5 +354,32 @@ function registerMiniAppRoutes(app, auth, management) {
         await management.markNotificationRead(context, id);
         return data({ ok: true });
     });
+    app.get('/api/v1/businesses/:businessId/system-logs', async (request) => {
+        const context = await auth.requireSession(request);
+        const { businessId } = businessParams.parse(request.params);
+        const query = z
+            .object({
+            level: z.string().max(12).optional(),
+            category: z.string().max(20).optional(),
+            search: z.string().max(200).optional(),
+            from: z.string().max(40).optional(),
+            to: z.string().max(40).optional(),
+            page: z.string().max(10).optional(),
+            pageSize: z.string().max(10).optional(),
+            errorCode: z.string().max(100).optional(),
+        })
+            .parse(request.query);
+        return data(await management.systemLogs(context, businessId, query));
+    });
+    app.get('/api/v1/businesses/:businessId/system-logs/:id', async (request) => {
+        const context = await auth.requireSession(request);
+        const { businessId, id } = entityParams.parse(request.params);
+        return data(await management.systemLogDetail(context, businessId, id));
+    });
+    app.get('/api/v1/businesses/:businessId/diagnostics', async (request) => {
+        const context = await auth.requireSession(request);
+        const { businessId } = businessParams.parse(request.params);
+        return data(await management.diagnostics(context, businessId));
+    });
 }
 //# sourceMappingURL=routes.js.map

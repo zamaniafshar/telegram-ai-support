@@ -107,6 +107,31 @@ enum AiTraceOutcome {
   FAILED
 }
 
+enum SystemLogLevel {
+  TRACE
+  DEBUG
+  INFO
+  WARN
+  ERROR
+  FATAL
+}
+
+enum SystemLogCategory {
+  WEBHOOK
+  TELEGRAM
+  AI
+  RETRIEVAL
+  INDEXING
+  QDRANT
+  WORKER
+  HANDOFF
+  AUTH
+  SYSTEM
+  CREDIT
+  DATABASE
+  HTTP
+}
+
 model BusinessAccount {
   id                         String                 @id @db.Char(36)
   name                       String                 @db.VarChar(200)
@@ -132,6 +157,7 @@ model BusinessAccount {
   notifications              Notification[]
   aiSettings                 BusinessAiSettings?
   aiDecisionLogs             AiDecisionLog[]
+  systemLogs                 SystemLog[]
 
   @@index([isActive])
   @@index([aiProcessingLeaseExpiresAt])
@@ -570,3 +596,26 @@ model ProviderCreditMonitorState {
   @@index([nextCheckAt, leaseExpiresAt])
 }
 
+model SystemLog {
+  id                String            @id @db.Char(36)
+  businessAccountId String?           @db.Char(36)
+  level             SystemLogLevel
+  category          SystemLogCategory
+  message           String            @db.VarChar(500)
+  messageFa         String            @db.VarChar(500)
+  errorCode         String?           @db.VarChar(100)
+  correlationId     String?           @db.VarChar(64)
+  fingerprint       String            @db.VarChar(64)
+  count             Int               @default(1)
+  metadata          Json?
+  createdAt         DateTime          @default(now())
+  updatedAt         DateTime          @updatedAt
+  businessAccount   BusinessAccount?  @relation(fields: [businessAccountId], references: [id], onDelete: Cascade)
+
+  @@index([businessAccountId, createdAt])
+  @@index([level, createdAt])
+  @@index([category, createdAt])
+  @@index([fingerprint, createdAt])
+  @@index([errorCode, createdAt])
+  @@index([createdAt])
+}
