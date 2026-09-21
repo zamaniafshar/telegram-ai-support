@@ -1,0 +1,2 @@
+# P1527 added: https://pris.ly/d/migrate-provider-specify
+provider = "mysql"
