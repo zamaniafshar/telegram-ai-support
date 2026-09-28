@@ -53,6 +53,16 @@ export class BusinessUpdateIngestor {
   ) {}
 
   async ingest(update: TelegramUpdate, correlationId: string): Promise<IngestResult> {
+    const updateType = this.#updateType(update);
+    this.logger.trace(
+      {
+        category: 'TELEGRAM',
+        updateId: update.update_id,
+        updateType,
+        correlationId,
+      },
+      'telegram update ingest started',
+    );
     try {
       if (update.business_connection) {
         return await this.#syncConnection(update, correlationId);
@@ -76,8 +86,16 @@ export class BusinessUpdateIngestor {
       return await this.#markIgnored(update, correlationId);
     } catch (error) {
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
-        return { duplicate: true, type: this.#updateType(update) };
+        this.logger.trace(
+          { category: 'TELEGRAM', updateId: update.update_id, correlationId },
+          'duplicate telegram update ignored',
+        );
+        return { duplicate: true, type: updateType };
       }
+      this.logger.error(
+        { category: 'TELEGRAM', updateId: update.update_id, correlationId, err: error },
+        'telegram update ingest failed',
+      );
       throw error;
     }
   }
@@ -201,6 +219,23 @@ export class BusinessUpdateIngestor {
     if (content && content.length > this.config.rag.maxCustomerMessageLength) {
       throw new ValidationError('Message is too long', 'CUSTOMER_MESSAGE_TOO_LONG');
     }
+
+    this.logger.trace(
+      {
+        category: 'TELEGRAM',
+        updateId: update.update_id,
+        connectionId,
+        chatId: telegramMessage.chat.id.toString(),
+        messageId: telegramMessage.message_id.toString(),
+        fromId: telegramMessage.from?.id.toString(),
+        senderType: classification.senderType,
+        direction: classification.direction,
+        textLength: content?.length ?? 0,
+        customerText: content,
+        correlationId,
+      },
+      'business message received and classified',
+    );
 
     return this.prisma.$transaction(async (tx) => {
       await this.#insertProcessed(tx, update, correlationId);
@@ -331,6 +366,17 @@ export class BusinessUpdateIngestor {
           data: { processAfter },
         });
       }
+      this.logger.trace(
+        {
+          category: 'TELEGRAM',
+          updateId: update.update_id,
+          conversationId: conversation.id,
+          messageId: message.id,
+          jobQueued: incomingCustomer && Boolean(content),
+          correlationId,
+        },
+        'business message stored and job queued',
+      );
       return {
         duplicate: false,
         type: 'business_message',

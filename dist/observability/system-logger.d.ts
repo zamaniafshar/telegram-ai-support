@@ -1,6 +1,12 @@
+import { AsyncLocalStorage } from 'node:async_hooks';
 import type { PrismaClient } from '@prisma/client';
 import type { Logger } from 'pino';
 import type { AppConfig } from '../config/env.js';
+export declare const systemLogStorage: AsyncLocalStorage<{
+    isSystemLog: boolean;
+}>;
+export declare function isInsideSystemLogger(): boolean;
+export declare function safeJsonValue(value: unknown, seen?: WeakSet<WeakKey>): unknown;
 export type SystemLogLevel = 'TRACE' | 'DEBUG' | 'INFO' | 'WARN' | 'ERROR' | 'FATAL';
 export type SystemLogCategory = 'WEBHOOK' | 'TELEGRAM' | 'AI' | 'RETRIEVAL' | 'INDEXING' | 'QDRANT' | 'WORKER' | 'HANDOFF' | 'AUTH' | 'SYSTEM' | 'CREDIT' | 'DATABASE' | 'HTTP';
 export interface SystemLogInput {
@@ -22,12 +28,15 @@ export declare class SystemLogger {
     private readonly prisma;
     private readonly pino;
     private readonly config;
-    private dedup;
+    private readonly dedup;
     private lastPruneAt;
     constructor(prisma: PrismaClient, pino: Logger, config: AppConfig);
+    attachToLogger(logger: unknown): void;
     private shouldPersist;
     private pinoWrite;
+    ingestPinoRecord(record: Record<string, unknown>): Promise<void>;
     log(input: SystemLogInput): Promise<void>;
+    private persistInternal;
     trace(input: Omit<SystemLogInput, 'level'>): void;
     debug(input: Omit<SystemLogInput, 'level'>): void;
     info(input: Omit<SystemLogInput, 'level'>): void;
@@ -52,7 +61,7 @@ export declare class SystemLogger {
         pageSize: number;
         totalPages: number;
     }>;
-    get(id: string): Promise<unknown | null>;
+    get(id: string): Promise<unknown>;
     summary(params: {
         businessAccountId?: string | null;
         sinceHours?: number;
@@ -63,7 +72,7 @@ export declare class SystemLogger {
             errorCode: string;
             count: number;
             messageFa: string;
-            fix?: string | undefined;
+            fix?: string;
         }[];
         recentErrors: unknown[];
     }>;

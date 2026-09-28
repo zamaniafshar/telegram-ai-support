@@ -6,11 +6,13 @@ export class RetrievalService {
     embeddings;
     vectors;
     config;
-    constructor(prisma, embeddings, vectors, config) {
+    logger;
+    constructor(prisma, embeddings, vectors, config, logger) {
         this.prisma = prisma;
         this.embeddings = embeddings;
         this.vectors = vectors;
         this.config = config;
+        this.logger = logger;
     }
     async search(businessAccountId, question) {
         const result = await this.searchDetailed(businessAccountId, question);
@@ -18,6 +20,7 @@ export class RetrievalService {
     }
     async searchDetailed(businessAccountId, question) {
         const started = Date.now();
+        this.logger?.trace({ category: 'RETRIEVAL', businessAccountId, question }, 'retrieval vector search started');
         const [vector] = await this.embeddings.embed([question]);
         if (!vector)
             return { raw: [], validated: [], latencyMs: Date.now() - started };
@@ -28,6 +31,12 @@ export class RetrievalService {
             limit: this.config.rag.retrievalLimit,
         });
         if (candidates.length === 0) {
+            this.logger?.trace({
+                category: 'RETRIEVAL',
+                businessAccountId,
+                candidatesFound: 0,
+                latencyMs: Date.now() - started,
+            }, 'retrieval completed: no candidates met minimum score');
             return { raw: [], validated: [], latencyMs: Date.now() - started };
         }
         const knowledgeIds = [...new Set(candidates.map((item) => item.knowledgeId))];
@@ -53,10 +62,19 @@ export class RetrievalService {
         });
         const validatedSeeds = raw.filter((item) => item.validated);
         const validated = await this.#expandMatchedKnowledge(validatedSeeds, current);
+        const latencyMs = Date.now() - started;
+        this.logger?.trace({
+            category: 'RETRIEVAL',
+            businessAccountId,
+            candidatesFound: candidates.length,
+            rawCount: raw.length,
+            validatedCount: validated.length,
+            latencyMs,
+        }, 'retrieval completed with validated chunks');
         return {
             raw,
             validated,
-            latencyMs: Date.now() - started,
+            latencyMs,
         };
     }
     async #expandMatchedKnowledge(seeds, currentItems) {

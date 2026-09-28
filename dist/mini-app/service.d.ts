@@ -177,8 +177,8 @@ export declare class MiniAppManagementService {
             languageCode: string | null;
         };
         activeHandoff: {
-            id: string;
             createdAt: Date;
+            id: string;
             updatedAt: Date;
             conversationId: string;
             expiresAt: Date;
@@ -197,8 +197,8 @@ export declare class MiniAppManagementService {
             resolutionNote: string | null;
         } | null;
         history: {
-            id: string;
             createdAt: Date;
+            id: string;
             updatedAt: Date;
             conversationId: string;
             expiresAt: Date;
@@ -273,8 +273,8 @@ export declare class MiniAppManagementService {
             sentAt: Date;
         }[];
         handoffs: {
-            id: string;
             createdAt: Date;
+            id: string;
             updatedAt: Date;
             conversationId: string;
             expiresAt: Date;
@@ -310,11 +310,11 @@ export declare class MiniAppManagementService {
         query?: string | undefined;
     }): Promise<{
         published: {
-            id: string;
-            isActive: boolean;
-            createdAt: Date;
-            updatedAt: Date;
             businessAccountId: string;
+            createdAt: Date;
+            id: string;
+            updatedAt: Date;
+            isActive: boolean;
             title: string;
             description: string;
             version: number;
@@ -327,10 +327,10 @@ export declare class MiniAppManagementService {
             indexingLeaseExpiresAt: Date | null;
         }[];
         drafts: {
-            id: string;
-            createdAt: Date;
-            updatedAt: Date;
             businessAccountId: string;
+            createdAt: Date;
+            id: string;
+            updatedAt: Date;
             title: string;
             description: string;
             createdByAdminId: string;
@@ -341,11 +341,11 @@ export declare class MiniAppManagementService {
     }>;
     knowledgeDetails(context: MiniAppSessionContext, businessAccountId: string, knowledgeId: string): Promise<{
         item: {
-            id: string;
-            isActive: boolean;
-            createdAt: Date;
-            updatedAt: Date;
             businessAccountId: string;
+            createdAt: Date;
+            id: string;
+            updatedAt: Date;
+            isActive: boolean;
             title: string;
             description: string;
             version: number;
@@ -365,8 +365,8 @@ export declare class MiniAppManagementService {
             content: string;
         }[];
         jobs: {
-            id: string;
             createdAt: Date;
+            id: string;
             completedAt: Date | null;
             status: import("@prisma/client").$Enums.IndexingJobStatus;
             attempts: number;
@@ -374,10 +374,10 @@ export declare class MiniAppManagementService {
             lastErrorCode: string | null;
         }[];
         draft: {
-            id: string;
-            createdAt: Date;
-            updatedAt: Date;
             businessAccountId: string;
+            createdAt: Date;
+            id: string;
+            updatedAt: Date;
             title: string;
             description: string;
             createdByAdminId: string;
@@ -387,10 +387,10 @@ export declare class MiniAppManagementService {
         } | null;
     }>;
     createKnowledgeDraft(context: MiniAppSessionContext, businessAccountId: string, knowledgeItemId?: string): Promise<{
-        id: string;
-        createdAt: Date;
-        updatedAt: Date;
         businessAccountId: string;
+        createdAt: Date;
+        id: string;
+        updatedAt: Date;
         title: string;
         description: string;
         createdByAdminId: string;
@@ -403,10 +403,10 @@ export declare class MiniAppManagementService {
         title?: string | undefined;
         description?: string | undefined;
     }): Promise<{
-        id: string;
-        createdAt: Date;
-        updatedAt: Date;
         businessAccountId: string;
+        createdAt: Date;
+        id: string;
+        updatedAt: Date;
         title: string;
         description: string;
         createdByAdminId: string;
@@ -415,10 +415,10 @@ export declare class MiniAppManagementService {
         revision: number;
     }>;
     knowledgeDraftDetails(context: MiniAppSessionContext, businessAccountId: string, draftId: string): Promise<{
-        id: string;
-        createdAt: Date;
-        updatedAt: Date;
         businessAccountId: string;
+        createdAt: Date;
+        id: string;
+        updatedAt: Date;
         title: string;
         description: string;
         createdByAdminId: string;
@@ -428,11 +428,11 @@ export declare class MiniAppManagementService {
     }>;
     previewKnowledgeDraft(context: MiniAppSessionContext, businessAccountId: string, draftId: string): Promise<import("../knowledge/chunker.js").TextChunk[]>;
     publishKnowledgeDraft(context: MiniAppSessionContext, businessAccountId: string, draftId: string, revision: number): Promise<{
-        id: string;
-        isActive: boolean;
-        createdAt: Date;
-        updatedAt: Date;
         businessAccountId: string;
+        createdAt: Date;
+        id: string;
+        updatedAt: Date;
+        isActive: boolean;
         title: string;
         description: string;
         version: number;
@@ -490,8 +490,8 @@ export declare class MiniAppManagementService {
         telegramUserId: string;
         protected: boolean;
         id: string;
-        isActive: boolean;
         updatedAt: Date;
+        isActive: boolean;
         displayName: string | null;
         role: import("@prisma/client").$Enums.AdminRole;
     }[]>;
@@ -501,10 +501,10 @@ export declare class MiniAppManagementService {
         displayName?: string | undefined;
     }): Promise<{
         telegramUserId: string;
-        id: string;
-        isActive: boolean;
         createdAt: Date;
+        id: string;
         updatedAt: Date;
+        isActive: boolean;
         displayName: string | null;
         role: import("@prisma/client").$Enums.AdminRole;
         locale: string;
@@ -514,10 +514,10 @@ export declare class MiniAppManagementService {
         isActive?: boolean | undefined;
     }): Promise<{
         telegramUserId: string;
-        id: string;
-        isActive: boolean;
         createdAt: Date;
+        id: string;
         updatedAt: Date;
+        isActive: boolean;
         displayName: string | null;
         role: import("@prisma/client").$Enums.AdminRole;
         locale: string;
@@ -526,16 +526,16 @@ export declare class MiniAppManagementService {
     audit(context: MiniAppSessionContext, businessAccountId: string, options: {
         action?: string | undefined;
     }): Promise<{
-        id: string;
-        createdAt: Date;
         businessAccountId: string | null;
+        correlationId: string | null;
+        metadata: Prisma.JsonValue | null;
+        createdAt: Date;
+        id: string;
         actorType: import("@prisma/client").$Enums.AuditActorType;
         actorId: string | null;
         action: string;
         entityType: string;
         entityId: string;
-        metadata: Prisma.JsonValue | null;
-        correlationId: string | null;
     }[]>;
     settings(context: MiniAppSessionContext, businessAccountId: string): {
         timezone: string;
@@ -632,11 +632,11 @@ export declare class MiniAppManagementService {
     }[]>;
     markNotificationRead(context: MiniAppSessionContext, deliveryId: string): Promise<void>;
     setKnowledgeActive(context: MiniAppSessionContext, businessAccountId: string, knowledgeId: string, isActive: boolean): Promise<{
-        id: string;
-        isActive: boolean;
-        createdAt: Date;
-        updatedAt: Date;
         businessAccountId: string;
+        createdAt: Date;
+        id: string;
+        updatedAt: Date;
+        isActive: boolean;
         title: string;
         description: string;
         version: number;
@@ -696,7 +696,7 @@ export declare class MiniAppManagementService {
                 errorCode: string;
                 count: number;
                 messageFa: string;
-                fix?: string | undefined;
+                fix?: string;
             }[];
             recentErrors: unknown[];
         } | null;

@@ -24,6 +24,13 @@ export class BusinessMessenger {
         }
         const { conversation, connection } = await this.#validateAndGetContext(conversationId, false);
         const parts = splitSupportAnswer(text);
+        this.logger.trace({
+            category: 'TELEGRAM',
+            conversationId,
+            sourceMessageId,
+            totalChars: text.length,
+            partsCount: parts.length,
+        }, 'ai answer split into parts for telegram delivery');
         for (let index = 0; index < parts.length; index += 1) {
             const part = parts[index];
             if (!part)
@@ -165,6 +172,15 @@ export class BusinessMessenger {
         };
     }
     async #sendPart(options) {
+        this.logger.trace({
+            category: 'TELEGRAM',
+            conversationId: options.conversationId,
+            telegramChatId: options.telegramChatId.toString(),
+            textLength: options.text.length,
+            partIndex: options.metadata['splitPartIndex'],
+            totalParts: options.metadata['splitTotalParts'],
+            senderType: options.senderType,
+        }, 'sending message part to telegram');
         const formattedHtml = sanitizeTelegramHtml(options.text);
         let sent;
         try {
@@ -180,8 +196,11 @@ export class BusinessMessenger {
                 category: 'TELEGRAM',
                 message: `sendMessage failed: ${code} ${error instanceof Error ? error.message : String(error)}`,
                 messageFa: isWindow ? 'پنجره پاسخ تلگرام منقضی شده' : 'ارسال پیام به تلگرام ناموفق بود',
-                errorCode: code ?? 'TELEGRAM_SEND_FAILED',
-                metadata: { conversationId: options.conversationId, error: error instanceof Error ? error.message : String(error) },
+                errorCode: code,
+                metadata: {
+                    conversationId: options.conversationId,
+                    error: error instanceof Error ? error.message : String(error),
+                },
             });
             if (isTelegramEntityParseError(error)) {
                 this.logger.warn({ conversationId: options.conversationId, err: error }, 'Telegram HTML parsing failed, falling back to plain text');
@@ -222,6 +241,12 @@ export class BusinessMessenger {
                 sourceMessageId: options.sourceMessageId,
             },
         });
+        this.logger.trace({
+            category: 'TELEGRAM',
+            conversationId: options.conversationId,
+            telegramMessageId: sent.message_id.toString(),
+            partIndex: options.metadata['splitPartIndex'],
+        }, 'message part sent to telegram and persisted to database');
     }
     async #markSourceAsRead(sourceMessageId) {
         if (!this.config.telegram.markRead)

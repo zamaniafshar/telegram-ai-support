@@ -310,7 +310,7 @@ const descriptions: Record<string, string> = {
   '/analytics': 'بررسی کیفیت و ردیابی پاسخ‌های AI',
   '/knowledge': 'محتوای پاسخ‌گویی',
   '/connections': 'ارتباط حساب پشتیبانی',
-  '/system': 'سرویس‌ها و صف‌ها',
+  '/system': 'وضعیت اتصال، سلامت سرویس‌ها، صف‌ها و عیب‌یابی',
   '/admins': 'نقش‌ها و دسترسی',
   '/audit': 'تغییرات حساس',
   '/notifications': 'هشدارهای اخیر',
@@ -321,8 +321,7 @@ export function MorePage() {
   const links = [
     ...(hasCapability('analytics:read') ? [['/analytics', '⌁', 'تحلیل پاسخ‌های هوشمند']] : []),
     ...(hasCapability('knowledge:manage') ? [['/knowledge', '▤', 'مدیریت دانش']] : []),
-    ['/connections', '⌁', 'اتصال تجاری'],
-    ['/system', '♡', 'سلامت سامانه'],
+    ['/system', '♡', 'سلامت و عیب‌یابی'],
     ...(hasCapability('admin:manage') ? [['/admins', '♙', 'مدیران']] : []),
     ...(hasCapability('audit:read') ? [['/audit', '◷', 'فعالیت‌ها']] : []),
     ['/notifications', '♢', 'اعلان‌ها'],

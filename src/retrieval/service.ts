@@ -1,4 +1,5 @@
 import { IndexingStatus, type PrismaClient } from '@prisma/client';
+import type { Logger } from 'pino';
 import type { AppConfig } from '../config/env.js';
 import type { EmbeddingProvider } from '../ai/openai.js';
 import type { DetailedRetrieval, RetrievalResult } from '../domain/types.js';
@@ -13,6 +14,7 @@ export class RetrievalService {
     private readonly embeddings: EmbeddingProvider,
     private readonly vectors: VectorStore,
     private readonly config: AppConfig,
+    private readonly logger?: Logger,
   ) {}
 
   async search(businessAccountId: string, question: string): Promise<RetrievalResult[]> {
@@ -22,6 +24,10 @@ export class RetrievalService {
 
   async searchDetailed(businessAccountId: string, question: string): Promise<DetailedRetrieval> {
     const started = Date.now();
+    this.logger?.trace(
+      { category: 'RETRIEVAL', businessAccountId, question },
+      'retrieval vector search started',
+    );
     const [vector] = await this.embeddings.embed([question]);
     if (!vector) return { raw: [], validated: [], latencyMs: Date.now() - started };
     const candidates = await this.vectors.search({
@@ -31,6 +37,15 @@ export class RetrievalService {
       limit: this.config.rag.retrievalLimit,
     });
     if (candidates.length === 0) {
+      this.logger?.trace(
+        {
+          category: 'RETRIEVAL',
+          businessAccountId,
+          candidatesFound: 0,
+          latencyMs: Date.now() - started,
+        },
+        'retrieval completed: no candidates met minimum score',
+      );
       return { raw: [], validated: [], latencyMs: Date.now() - started };
     }
 
@@ -58,10 +73,22 @@ export class RetrievalService {
     });
     const validatedSeeds = raw.filter((item) => item.validated);
     const validated = await this.#expandMatchedKnowledge(validatedSeeds, current);
+    const latencyMs = Date.now() - started;
+    this.logger?.trace(
+      {
+        category: 'RETRIEVAL',
+        businessAccountId,
+        candidatesFound: candidates.length,
+        rawCount: raw.length,
+        validatedCount: validated.length,
+        latencyMs,
+      },
+      'retrieval completed with validated chunks',
+    );
     return {
       raw,
       validated,
-      latencyMs: Date.now() - started,
+      latencyMs,
     };
   }
 

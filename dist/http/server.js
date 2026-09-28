@@ -41,6 +41,37 @@ export async function buildServer(config, services, logger) {
     });
     app.addHook('onRequest', (request, reply, done) => {
         void reply.header('x-request-id', request.id);
+        request.log.trace({
+            category: 'HTTP',
+            method: request.method,
+            url: request.url,
+            headers: request.headers,
+            ip: request.ip,
+            reqId: request.id,
+        }, 'incoming http request');
+        done();
+    });
+    app.addHook('preHandler', (request, _reply, done) => {
+        if (request.body !== undefined) {
+            request.log.trace({
+                category: 'HTTP',
+                method: request.method,
+                url: request.url,
+                body: request.body,
+                reqId: request.id,
+            }, 'http request payload');
+        }
+        done();
+    });
+    app.addHook('onResponse', (request, reply, done) => {
+        request.log.trace({
+            category: 'HTTP',
+            method: request.method,
+            url: request.url,
+            statusCode: reply.statusCode,
+            responseTimeMs: reply.elapsedTime,
+            reqId: request.id,
+        }, 'http response sent');
         done();
     });
     app.get('/health/live', () => ({ status: 'ok' }));
@@ -104,7 +135,12 @@ export async function buildServer(config, services, logger) {
     app.setNotFoundHandler(async (_request, reply) => reply.code(404).send({ error: 'not_found' }));
     app.setErrorHandler(async (error, request, reply) => {
         request.log.error({ err: error }, 'request failed');
-        const sc = typeof error === 'object' && error !== null && 'statusCode' in error && typeof error.statusCode === 'number' ? error.statusCode : 500;
+        const sc = typeof error === 'object' &&
+            error !== null &&
+            'statusCode' in error &&
+            typeof error.statusCode === 'number'
+            ? error.statusCode
+            : 500;
         if (sc >= 500) {
             services.systemLogger.error({
                 category: 'HTTP',

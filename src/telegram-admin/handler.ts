@@ -1,4 +1,5 @@
 import { Prisma, TelegramBotKind, type PrismaClient } from '@prisma/client';
+import type { Logger } from 'pino';
 import type { AdminAuthorizer } from '../security/admin-authorization.js';
 import type { TelegramApi } from '../telegram-business/client.js';
 import { telegramUpdateIdentity } from '../telegram-business/idempotency.js';
@@ -17,16 +18,36 @@ export class AdminBotHandler {
     private readonly telegram: TelegramApi,
     private readonly authorizer: AdminAuthorizer,
     private readonly miniAppUrl: string,
+    private readonly logger?: Logger,
   ) {}
 
   async handle(update: TelegramUpdate, correlationId: string): Promise<void> {
     const actor = update.message?.from;
     if (!actor) return;
     const chatId = telegramId(actor.id);
+    this.logger?.trace(
+      {
+        category: 'TELEGRAM',
+        botKind: 'ADMIN',
+        updateId: update.update_id,
+        actorId: actor.id,
+        correlationId,
+      },
+      'admin bot update received',
+    );
     try {
       await this.authorizer.requireAdmin(chatId);
     } catch (error) {
       if (error instanceof AuthorizationError) {
+        this.logger?.warn(
+          {
+            category: 'TELEGRAM',
+            botKind: 'ADMIN',
+            updateId: update.update_id,
+            chatId: chatId.toString(),
+          },
+          'admin bot unauthorized access attempt',
+        );
         await this.telegram.sendMessage(chatId, adminBotText.unauthorized);
         return;
       }
@@ -53,5 +74,14 @@ export class AdminBotHandler {
         inline_keyboard: [[{ text: 'باز کردن پنل مدیریت', web_app: { url: this.miniAppUrl } }]],
       },
     });
+    this.logger?.trace(
+      {
+        category: 'TELEGRAM',
+        botKind: 'ADMIN',
+        updateId: update.update_id,
+        chatId: chatId.toString(),
+      },
+      'admin bot launch button sent successfully',
+    );
   }
 }

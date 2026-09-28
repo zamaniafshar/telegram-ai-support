@@ -1,3 +1,4 @@
+import type { Logger } from 'pino';
 import type { AppConfig } from '../config/env.js';
 import type { AiDecisionResult, ConversationContextMessage, CurrentMessageBatchItem, RetrievalResult } from '../domain/types.js';
 import type { AiProviderFailureReporter } from './nanogpt-credit.js';
@@ -17,8 +18,9 @@ export declare class OpenAiAdapter implements EmbeddingProvider, GroundedAnswere
     #private;
     private readonly config;
     private readonly failureReporter?;
+    private readonly logger?;
     private readonly client;
-    constructor(config: AppConfig, failureReporter?: AiProviderFailureReporter | undefined);
+    constructor(config: AppConfig, failureReporter?: AiProviderFailureReporter | undefined, logger?: Logger | undefined);
     embed(texts: string[]): Promise<number[][]>;
     decide(input: {
         customerText: string;

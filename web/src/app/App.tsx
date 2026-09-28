@@ -5,7 +5,8 @@ import { AppShell } from './AppShell';
 import { SessionProvider, useSession } from './SessionProvider';
 import { ToastProvider } from './ToastProvider';
 import { ThemeProvider } from './ThemeProvider';
-import { OverviewPage, ConnectionsPage, SystemPage } from '../features/overview/OverviewPages';
+import { OverviewPage } from '../features/overview/OverviewPages';
+import { SystemHealthPage } from '../features/system/SystemHealthPage';
 import { SettingsPage } from '../features/settings/AiSettingsPage';
 import { HandoffDetailPage, HandoffsPage, AiBacklogPage } from '../features/support/SupportPages';
 import {
@@ -16,7 +17,6 @@ import {
 import { AdminsPage, AuditPage, MorePage, NotificationsPage } from '../features/admin/AdminPages';
 import { EmptyState } from '../components/ui';
 import { AnalyticsPage, AnalyticsTracePage } from '../features/analytics/AnalyticsPages';
-import { DiagnosticsPage } from '../features/diagnostics/DiagnosticsPage';
 import { LogsPage } from '../features/diagnostics/LogsPage';
 import { ConfirmationProvider } from './ConfirmationProvider';
 
@@ -114,10 +114,23 @@ export function App() {
                       </CapabilityRoute>
                     }
                   />
-                  <Route path="connections" element={<ConnectionsPage />} />
-                  <Route path="system" element={<SystemPage />} />
-                  <Route path="diagnostics" element={<CapabilityRoute capability="diagnostics:read"><DiagnosticsPage /></CapabilityRoute>} />
-                  <Route path="logs" element={<CapabilityRoute capability="diagnostics:read"><LogsPage /></CapabilityRoute>} />
+                  <Route
+                    path="connections"
+                    element={<Navigate to="/system?tab=connections" replace />}
+                  />
+                  <Route path="system" element={<SystemHealthPage />} />
+                  <Route
+                    path="diagnostics"
+                    element={<Navigate to="/system?tab=diagnostics" replace />}
+                  />
+                  <Route
+                    path="logs"
+                    element={
+                      <CapabilityRoute capability="diagnostics:read">
+                        <LogsPage />
+                      </CapabilityRoute>
+                    }
+                  />
                   <Route
                     path="admins"
                     element={

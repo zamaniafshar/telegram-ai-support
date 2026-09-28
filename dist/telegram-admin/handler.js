@@ -12,22 +12,37 @@ export class AdminBotHandler {
     telegram;
     authorizer;
     miniAppUrl;
-    constructor(prisma, telegram, authorizer, miniAppUrl) {
+    logger;
+    constructor(prisma, telegram, authorizer, miniAppUrl, logger) {
         this.prisma = prisma;
         this.telegram = telegram;
         this.authorizer = authorizer;
         this.miniAppUrl = miniAppUrl;
+        this.logger = logger;
     }
     async handle(update, correlationId) {
         const actor = update.message?.from;
         if (!actor)
             return;
         const chatId = telegramId(actor.id);
+        this.logger?.trace({
+            category: 'TELEGRAM',
+            botKind: 'ADMIN',
+            updateId: update.update_id,
+            actorId: actor.id,
+            correlationId,
+        }, 'admin bot update received');
         try {
             await this.authorizer.requireAdmin(chatId);
         }
         catch (error) {
             if (error instanceof AuthorizationError) {
+                this.logger?.warn({
+                    category: 'TELEGRAM',
+                    botKind: 'ADMIN',
+                    updateId: update.update_id,
+                    chatId: chatId.toString(),
+                }, 'admin bot unauthorized access attempt');
                 await this.telegram.sendMessage(chatId, adminBotText.unauthorized);
                 return;
             }
@@ -54,6 +69,12 @@ export class AdminBotHandler {
                 inline_keyboard: [[{ text: 'باز کردن پنل مدیریت', web_app: { url: this.miniAppUrl } }]],
             },
         });
+        this.logger?.trace({
+            category: 'TELEGRAM',
+            botKind: 'ADMIN',
+            updateId: update.update_id,
+            chatId: chatId.toString(),
+        }, 'admin bot launch button sent successfully');
     }
 }
 //# sourceMappingURL=handler.js.map

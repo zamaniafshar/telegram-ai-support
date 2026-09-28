@@ -20,16 +20,17 @@ import { MiniAppAuthService } from './mini-app/auth.js';
 import { MiniAppManagementService } from './mini-app/service.js';
 import { AiAvailabilityService } from './ai/availability.js';
 export function createServices(config, logger, prisma) {
-    const database = prisma ?? createPrismaClient();
+    const database = prisma ?? createPrismaClient(config, logger);
     const systemLogger = new SystemLogger(database, logger, config);
-    const businessTelegram = new TelegramBotApiClient(config.telegram.businessBotToken);
-    const adminTelegram = new TelegramBotApiClient(config.telegram.adminBotToken);
+    systemLogger.attachToLogger(logger);
+    const businessTelegram = new TelegramBotApiClient(config.telegram.businessBotToken, 15_000, logger);
+    const adminTelegram = new TelegramBotApiClient(config.telegram.adminBotToken, 15_000, logger);
     const notifier = new AdminNotifier(database, adminTelegram, config, logger);
     const nanoGptBalances = new NanoGptBalanceClient(config);
     const nanoGptCredit = new NanoGptCreditMonitor(database, nanoGptBalances, notifier, config, logger);
-    const openai = new OpenAiAdapter(config, nanoGptCredit);
+    const openai = new OpenAiAdapter(config, nanoGptCredit, logger);
     const vectors = new QdrantVectorStore(config);
-    const retrieval = new RetrievalService(database, openai, vectors, config);
+    const retrieval = new RetrievalService(database, openai, vectors, config, logger);
     const handoffs = new HandoffService(database, config, logger, notifier);
     const indexing = new IndexingService(database, openai, vectors, config, logger, notifier);
     const messenger = new BusinessMessenger(database, businessTelegram, config, logger, systemLogger);
@@ -41,7 +42,7 @@ export function createServices(config, logger, prisma) {
     const miniAppAuth = new MiniAppAuthService(database, config);
     const miniAppManagement = new MiniAppManagementService(database, knowledge, handoffs, health, config, aiAvailability, notifier, systemLogger);
     const businessIngestor = new BusinessUpdateIngestor(database, businessTelegram, config, logger);
-    const adminHandler = new AdminBotHandler(database, adminTelegram, authorizer, config.telegram.miniAppUrl);
+    const adminHandler = new AdminBotHandler(database, adminTelegram, authorizer, config.telegram.miniAppUrl, logger);
     const worker = new WorkerRunner(indexing, conversations, handoffs, nanoGptCredit, notifier, config, logger, systemLogger);
     return {
         prisma: database,

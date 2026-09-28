@@ -3,13 +3,13 @@ import type { MiniAppSessionContext } from './auth.js';
 export declare function requireRole(context: MiniAppSessionContext, minimum: AdminRole): void;
 export declare function requireOwner(context: MiniAppSessionContext): void;
 export declare function requireBusiness(context: MiniAppSessionContext, businessAccountId: string): {
-    name: string;
+    createdAt: Date;
     id: string;
+    updatedAt: Date;
+    name: string;
     telegramAccountUserId: bigint | null;
     defaultLocale: string;
     isActive: boolean;
-    createdAt: Date;
-    updatedAt: Date;
     aiProcessingLeaseOwner: string | null;
     aiProcessingLeaseExpiresAt: Date | null;
     aiHourlyWindowStartedAt: Date | null;

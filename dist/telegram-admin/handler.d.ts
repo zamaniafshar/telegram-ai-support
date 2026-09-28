@@ -1,4 +1,5 @@
 import { type PrismaClient } from '@prisma/client';
+import type { Logger } from 'pino';
 import type { AdminAuthorizer } from '../security/admin-authorization.js';
 import type { TelegramApi } from '../telegram-business/client.js';
 import type { TelegramUpdate } from '../telegram-business/types.js';
@@ -11,6 +12,7 @@ export declare class AdminBotHandler {
     private readonly telegram;
     private readonly authorizer;
     private readonly miniAppUrl;
-    constructor(prisma: PrismaClient, telegram: TelegramApi, authorizer: AdminAuthorizer, miniAppUrl: string);
+    private readonly logger?;
+    constructor(prisma: PrismaClient, telegram: TelegramApi, authorizer: AdminAuthorizer, miniAppUrl: string, logger?: Logger | undefined);
     handle(update: TelegramUpdate, correlationId: string): Promise<void>;
 }

@@ -249,6 +249,17 @@ export class ConversationProcessor {
       return false;
     }
 
+    this.logger.trace(
+      {
+        category: 'AI',
+        conversationId,
+        batchId,
+        jobsCount: jobs.length,
+        jobIds: ids,
+      },
+      'conversation message batch claimed for ai processing',
+    );
+
     const conversation = await this.prisma.conversation.findUniqueOrThrow({
       where: { id: conversationId },
       include: {
@@ -395,6 +406,16 @@ export class ConversationProcessor {
     const route = preModelRoute(customerText, {
       safeGreetingEnabled: this.config.routing.safeGreetingEnabled,
     });
+    this.logger.trace(
+      {
+        category: 'AI',
+        conversationId,
+        batchId,
+        customerText,
+        routeKind: route.kind,
+      },
+      'evaluating pre-model route for customer text',
+    );
     if (route.kind === 'HANDOFF') {
       await this.#activateHandoff(
         conversationId,
@@ -419,6 +440,15 @@ export class ConversationProcessor {
 
     let answer: string | null = route.kind === 'SAFE_GREETING' ? route.answer : null;
     if (!answer) {
+      this.logger.trace(
+        {
+          category: 'AI',
+          conversationId,
+          batchId,
+          customerTextPreview: customerText.slice(0, 100),
+        },
+        'initiating retrieval and calling AI grounded answerer',
+      );
       const decision = await this.messenger.whileTyping(conversationId, async () => {
         const retrieval = await this.#retrieveWithTrace(
           conversation.businessAccountId,
@@ -434,6 +464,19 @@ export class ConversationProcessor {
         await this.#recordDecision(firstJob, result, retrieval.validated);
         return result;
       });
+      this.logger.trace(
+        {
+          category: 'AI',
+          conversationId,
+          batchId,
+          answerable: decision.answerable,
+          decision: decision.decision,
+          confidence: decision.confidence,
+          reason: decision.reason,
+          hasAnswer: Boolean(decision.answer),
+        },
+        'ai answerer decision returned to conversation processor',
+      );
       if (!decision.answerable || !decision.answer) {
         await this.#activateHandoff(
           conversationId,
@@ -493,6 +536,15 @@ export class ConversationProcessor {
       );
       return true;
     }
+    this.logger.trace(
+      {
+        category: 'AI',
+        conversationId,
+        batchId,
+        answerLength: answer.length,
+      },
+      'dispatching AI answer to messenger',
+    );
     await this.messenger.sendAiAnswer(conversationId, answer, firstJob.messageId);
     await this.#finishBatch(jobs, MessageProcessingStatus.PROCESSED, batchId, null);
     await this.#audit(
@@ -502,6 +554,17 @@ export class ConversationProcessor {
       { messageCount: jobs.length, batchId },
     );
     await this.#setTraceOutcome(firstJob.messageId, AiTraceOutcome.SENT, null, traceStartedAt);
+    this.logger.trace(
+      {
+        category: 'AI',
+        conversationId,
+        batchId,
+        jobsCount: jobs.length,
+        outcome: AiTraceOutcome.SENT,
+        totalDurationMs: Date.now() - traceStartedAt,
+      },
+      'conversation batch processing completed successfully',
+    );
     return true;
   }
 
@@ -983,7 +1046,12 @@ export class ConversationProcessor {
       message: `conversation batch failed: ${code}`,
       messageFa: 'پردازش گفتگو با خطا مواجه شد',
       errorCode: code,
-      metadata: { conversationId, attempts, maxAttempts, error: error instanceof Error ? error.message : String(error) },
+      metadata: {
+        conversationId,
+        attempts,
+        maxAttempts,
+        error: error instanceof Error ? error.message : String(error),
+      },
     });
     if (!shouldHandoffExternalFailure(attempts, maxAttempts)) {
       await this.#updateTrace(firstJob.messageId, { errorCode: code });

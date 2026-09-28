@@ -1,4 +1,5 @@
 import OpenAI from 'openai';
+import type { Logger } from 'pino';
 import type { AppConfig } from '../config/env.js';
 import type {
   AiDecisionResult,
@@ -51,6 +52,7 @@ export class OpenAiAdapter implements EmbeddingProvider, GroundedAnswerer {
   constructor(
     private readonly config: AppConfig,
     private readonly failureReporter?: AiProviderFailureReporter,
+    private readonly logger?: Logger,
   ) {
     this.client = new OpenAI({
       apiKey: config.openai.apiKey,
@@ -62,7 +64,17 @@ export class OpenAiAdapter implements EmbeddingProvider, GroundedAnswerer {
 
   async embed(texts: string[]): Promise<number[][]> {
     if (texts.length === 0) return [];
-    const response = await this.#monitoredRequest(() =>
+    const started = Date.now();
+    this.logger?.trace(
+      {
+        category: 'AI',
+        model: this.config.openai.embeddingModel,
+        textsCount: texts.length,
+        totalChars: texts.reduce((acc, t) => acc + t.length, 0),
+      },
+      'ai embedding request started',
+    );
+    const response = await this.#monitoredRequest('embedding', () =>
       this.client.embeddings.create({
         model: this.config.openai.embeddingModel,
         input: texts,
@@ -76,6 +88,17 @@ export class OpenAiAdapter implements EmbeddingProvider, GroundedAnswerer {
     if (ordered.length !== texts.length) {
       throw new AppError('Embedding count mismatch', 'OPENAI_EMBEDDING_COUNT_MISMATCH', 502, true);
     }
+    const latencyMs = Date.now() - started;
+    this.logger?.trace(
+      {
+        category: 'AI',
+        model: this.config.openai.embeddingModel,
+        textsCount: texts.length,
+        dimensions: ordered[0]?.embedding.length,
+        latencyMs,
+      },
+      'ai embedding response received',
+    );
     return ordered.map((item) => item.embedding);
   }
 
@@ -217,7 +240,26 @@ export class OpenAiAdapter implements EmbeddingProvider, GroundedAnswerer {
       })),
     });
 
-    const response = await this.#monitoredRequest(() =>
+    this.logger?.trace(
+      {
+        category: 'AI',
+        model: this.config.openai.chatModel,
+        promptVersion: PROMPT_VERSION,
+        batchSize: input.currentMessageBatch?.length ?? 1,
+        contextCount: input.context.length,
+        retrievedCount: input.retrieved.length,
+        retrievedChunkIds: input.retrieved.map((r) => r.chunkId),
+        payloadLength: userPayload.length,
+        customerText: input.customerText,
+        payload:
+          this.config.log.personalData || this.config.log.level === 'trace'
+            ? userPayload
+            : undefined,
+      },
+      'ai completion request started',
+    );
+
+    const response = await this.#monitoredRequest('chat-completion', () =>
       this.client.responses.create({
         model: this.config.openai.chatModel,
         store: false,
@@ -237,6 +279,18 @@ export class OpenAiAdapter implements EmbeddingProvider, GroundedAnswerer {
       }),
     );
 
+    const latencyMs = Date.now() - started;
+    this.logger?.trace(
+      {
+        category: 'AI',
+        model: this.config.openai.chatModel,
+        latencyMs,
+        usage: response.usage,
+        rawOutput: response.output_text,
+      },
+      'ai completion response received',
+    );
+
     const parsedJson = JSON.parse(response.output_text) as unknown;
     const retrievedIds = new Set(input.retrieved.map((result) => result.chunkId));
     const decision = enforceGrounding(parsedJson, retrievedIds);
@@ -244,6 +298,20 @@ export class OpenAiAdapter implements EmbeddingProvider, GroundedAnswerer {
     if (input.context.length > 0 && decision.answer) {
       decision.answer = stripRedundantGreeting(decision.answer);
     }
+
+    this.logger?.trace(
+      {
+        category: 'AI',
+        decision: decision.decision,
+        answerable: decision.answerable,
+        confidence: decision.confidence,
+        reason: decision.reason,
+        answerLength: decision.answer?.length ?? 0,
+        supportingChunkIds: decision.supportingChunkIds,
+        latencyMs,
+      },
+      'ai decision evaluated and grounded',
+    );
 
     return {
       ...decision,
@@ -257,14 +325,24 @@ export class OpenAiAdapter implements EmbeddingProvider, GroundedAnswerer {
       ...(response.usage?.total_tokens === undefined
         ? {}
         : { totalTokens: response.usage.total_tokens }),
-      latencyMs: Date.now() - started,
+      latencyMs,
     };
   }
 
-  async #monitoredRequest<T>(request: () => Promise<T>): Promise<T> {
+  async #monitoredRequest<T>(operation: string, request: () => Promise<T>): Promise<T> {
+    const started = Date.now();
     try {
       return await request();
     } catch (error) {
+      this.logger?.error(
+        {
+          category: 'AI',
+          operation,
+          latencyMs: Date.now() - started,
+          err: error,
+        },
+        `ai request failed: ${operation}`,
+      );
       await this.failureReporter?.providerRequestFailed(error);
       throw error;
     }

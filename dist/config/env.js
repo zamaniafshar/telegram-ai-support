@@ -96,8 +96,13 @@ const envSchema = z.object({
     AI_INPUT_COST_PER_MILLION_USD: z.coerce.number().nonnegative().optional(),
     AI_OUTPUT_COST_PER_MILLION_USD: z.coerce.number().nonnegative().optional(),
     RUN_WORKERS_IN_API: booleanString,
-    SYSTEM_LOG_ENABLED: z.enum(['true', 'false']).default('true').transform((v) => v === 'true'),
-    SYSTEM_LOG_DB_LEVEL: z.enum(['trace', 'debug', 'info', 'warn', 'error', 'fatal', 'silent']).default('warn'),
+    SYSTEM_LOG_ENABLED: z
+        .enum(['true', 'false'])
+        .default('true')
+        .transform((v) => v === 'true'),
+    SYSTEM_LOG_DB_LEVEL: z
+        .enum(['trace', 'debug', 'info', 'warn', 'error', 'fatal', 'silent'])
+        .default('warn'),
     SYSTEM_LOG_RETENTION_DAYS: z.coerce.number().int().min(1).max(3650).default(30),
     SYSTEM_LOG_DEDUP_MS: z.coerce.number().int().min(0).max(3_600_000).default(300_000),
     TRUST_PROXY: booleanString,

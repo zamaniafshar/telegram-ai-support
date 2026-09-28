@@ -25,8 +25,12 @@ export class LongPollingRunner {
         let consecutiveErrors = 0;
         while (!isAborted(signal)) {
             try {
+                this.logger.trace({ category: 'TELEGRAM', offset, allowedUpdates: this.allowedUpdates }, 'telegram long polling request started');
                 const updates = await this.telegram.getUpdates(offset, this.allowedUpdates, 25);
                 consecutiveErrors = 0;
+                if (updates.length > 0) {
+                    this.logger.trace({ category: 'TELEGRAM', count: updates.length, offset }, 'telegram long polling updates received');
+                }
                 for (const raw of updates) {
                     if (isAborted(signal))
                         return;
@@ -40,7 +44,9 @@ export class LongPollingRunner {
                     try {
                         const update = telegramUpdateSchema.parse(raw);
                         offset = update.update_id + 1;
+                        this.logger.trace({ category: 'TELEGRAM', updateId: update.update_id }, 'processing polled telegram update');
                         await this.handler(update);
+                        this.logger.trace({ category: 'TELEGRAM', updateId: update.update_id }, 'polled telegram update processed');
                     }
                     catch (itemError) {
                         if (isAborted(signal))
@@ -73,9 +79,16 @@ export class LongPollingRunner {
                 this.systemLogger?.error({
                     category: 'TELEGRAM',
                     message: isConflict ? 'long polling conflict detected' : 'long polling cycle failed',
-                    messageFa: isConflict ? 'دو نمونه ربات همزمان اجرا شده' : 'دریافت پیام از تلگرام با خطا مواجه شد',
+                    messageFa: isConflict
+                        ? 'دو نمونه ربات همزمان اجرا شده'
+                        : 'دریافت پیام از تلگرام با خطا مواجه شد',
                     errorCode: isConflict ? 'POLLING_CONFLICT' : 'TELEGRAM_NETWORK_ERROR',
-                    metadata: { isConflict, consecutiveErrors, backoffMs, error: error instanceof Error ? error.message : String(error) },
+                    metadata: {
+                        isConflict,
+                        consecutiveErrors,
+                        backoffMs,
+                        error: error instanceof Error ? error.message : String(error),
+                    },
                 });
                 await delay(backoffMs, undefined, { signal }).catch(() => undefined);
             }

@@ -50,7 +50,10 @@ export class WorkerRunner {
           message: `worker cycle failed: ${error instanceof Error ? error.message : String(error)}`,
           messageFa: 'پردازش پس‌زمینه با خطا مواجه شد',
           errorCode: 'WORKER_FAILED',
-          metadata: { workerId: this.workerId, error: error instanceof Error ? error.message : String(error) },
+          metadata: {
+            workerId: this.workerId,
+            error: error instanceof Error ? error.message : String(error),
+          },
         });
       }
       await delay(this.config.worker.pollIntervalMs, undefined, { signal }).catch(() => undefined);

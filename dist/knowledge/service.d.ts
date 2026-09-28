@@ -21,11 +21,11 @@ export declare class KnowledgeService {
     get(businessAccountId: string, id: string): Promise<KnowledgeItem | null>;
     list(businessAccountId: string, page?: number, pageSize?: number, query?: string): Promise<{
         items: {
-            id: string;
-            isActive: boolean;
-            createdAt: Date;
-            updatedAt: Date;
             businessAccountId: string;
+            createdAt: Date;
+            id: string;
+            updatedAt: Date;
+            isActive: boolean;
             title: string;
             description: string;
             version: number;

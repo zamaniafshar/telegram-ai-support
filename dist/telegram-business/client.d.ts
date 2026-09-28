@@ -1,3 +1,4 @@
+import type { Logger } from 'pino';
 import type { BusinessConnectionUpdate, InlineKeyboardMarkup, SentTelegramMessage, TelegramWebhookInfo } from './types.js';
 export interface SendMessageOptions {
     businessConnectionId?: string;
@@ -26,7 +27,8 @@ export interface TelegramApi {
 export declare class TelegramBotApiClient implements TelegramApi {
     #private;
     private readonly timeoutMs;
-    constructor(token: string, timeoutMs?: number);
+    private readonly logger?;
+    constructor(token: string, timeoutMs?: number, logger?: Logger | undefined);
     sendMessage(chatId: bigint, text: string, options?: SendMessageOptions): Promise<SentTelegramMessage>;
     sendChatAction(chatId: bigint, action: 'typing', options?: SendChatActionOptions): Promise<void>;
     getBusinessConnection(id: string): Promise<BusinessConnectionUpdate>;

@@ -24,10 +24,15 @@ import { MiniAppManagementService } from './mini-app/service.js';
 import { AiAvailabilityService } from './ai/availability.js';
 
 export function createServices(config: AppConfig, logger: Logger, prisma?: PrismaClient) {
-  const database = prisma ?? createPrismaClient();
+  const database = prisma ?? createPrismaClient(config, logger);
   const systemLogger = new SystemLogger(database as unknown as never, logger, config);
-  const businessTelegram = new TelegramBotApiClient(config.telegram.businessBotToken);
-  const adminTelegram = new TelegramBotApiClient(config.telegram.adminBotToken);
+  systemLogger.attachToLogger(logger);
+  const businessTelegram = new TelegramBotApiClient(
+    config.telegram.businessBotToken,
+    15_000,
+    logger,
+  );
+  const adminTelegram = new TelegramBotApiClient(config.telegram.adminBotToken, 15_000, logger);
   const notifier = new AdminNotifier(database, adminTelegram, config, logger);
   const nanoGptBalances = new NanoGptBalanceClient(config);
   const nanoGptCredit = new NanoGptCreditMonitor(
@@ -37,9 +42,9 @@ export function createServices(config: AppConfig, logger: Logger, prisma?: Prism
     config,
     logger,
   );
-  const openai = new OpenAiAdapter(config, nanoGptCredit);
+  const openai = new OpenAiAdapter(config, nanoGptCredit, logger);
   const vectors = new QdrantVectorStore(config);
-  const retrieval = new RetrievalService(database, openai, vectors, config);
+  const retrieval = new RetrievalService(database, openai, vectors, config, logger);
   const handoffs = new HandoffService(database, config, logger, notifier);
   const indexing = new IndexingService(database, openai, vectors, config, logger, notifier);
   const messenger = new BusinessMessenger(database, businessTelegram, config, logger, systemLogger);
@@ -76,6 +81,7 @@ export function createServices(config: AppConfig, logger: Logger, prisma?: Prism
     adminTelegram,
     authorizer,
     config.telegram.miniAppUrl,
+    logger,
   );
   const worker = new WorkerRunner(
     indexing,

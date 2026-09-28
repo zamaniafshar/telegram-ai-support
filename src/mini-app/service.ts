@@ -29,7 +29,11 @@ import {
   type QueuePolicy,
 } from '../ai/availability.js';
 import type { AdminNotifier } from '../telegram-admin/notifier.js';
-import type { SystemLogger, SystemLogCategory, SystemLogLevel } from '../observability/system-logger.js';
+import type {
+  SystemLogger,
+  SystemLogCategory,
+  SystemLogLevel,
+} from '../observability/system-logger.js';
 
 const adminSelect = {
   id: true,
@@ -1423,17 +1427,42 @@ export class MiniAppManagementService {
   async systemLogs(
     context: MiniAppSessionContext,
     businessAccountId: string,
-    filters: { level?: string | undefined; category?: string | undefined; search?: string | undefined; from?: string | undefined; to?: string | undefined; page?: string | undefined; pageSize?: string | undefined; errorCode?: string | undefined },
+    filters: {
+      level?: string | undefined;
+      category?: string | undefined;
+      search?: string | undefined;
+      from?: string | undefined;
+      to?: string | undefined;
+      page?: string | undefined;
+      pageSize?: string | undefined;
+      errorCode?: string | undefined;
+    },
   ) {
     requireBusiness(context, businessAccountId);
     requireRole(context, AdminRole.ADMIN);
     if (!this.systemLogger) throw new ResourceUnavailableError();
     const levels: SystemLogLevel[] = ['TRACE', 'DEBUG', 'INFO', 'WARN', 'ERROR', 'FATAL'];
-    const cats: SystemLogCategory[] = ['WEBHOOK', 'TELEGRAM', 'AI', 'RETRIEVAL', 'INDEXING', 'QDRANT', 'WORKER', 'HANDOFF', 'AUTH', 'SYSTEM', 'CREDIT', 'DATABASE', 'HTTP'];
+    const cats: SystemLogCategory[] = [
+      'WEBHOOK',
+      'TELEGRAM',
+      'AI',
+      'RETRIEVAL',
+      'INDEXING',
+      'QDRANT',
+      'WORKER',
+      'HANDOFF',
+      'AUTH',
+      'SYSTEM',
+      'CREDIT',
+      'DATABASE',
+      'HTTP',
+    ];
     const level = levels.find((v) => v === filters.level?.toUpperCase()) ?? null;
     const category = cats.find((v) => v === filters.category?.toUpperCase()) ?? null;
     const page = filters.page ? Math.max(1, Number(filters.page) || 1) : 1;
-    const pageSize = filters.pageSize ? Math.min(100, Math.max(1, Number(filters.pageSize) || 20)) : 20;
+    const pageSize = filters.pageSize
+      ? Math.min(100, Math.max(1, Number(filters.pageSize) || 20))
+      : 20;
     const from = filters.from ? new Date(filters.from) : null;
     const to = filters.to ? new Date(filters.to) : null;
     return this.systemLogger.list({
@@ -1456,7 +1485,8 @@ export class MiniAppManagementService {
     const item = await this.systemLogger.get(id);
     if (!item) throw new ResourceUnavailableError();
     const row = item as { businessAccountId?: string | null };
-    if (row.businessAccountId && row.businessAccountId !== businessAccountId) throw new ResourceUnavailableError();
+    if (row.businessAccountId && row.businessAccountId !== businessAccountId)
+      throw new ResourceUnavailableError();
     return item;
   }
 
@@ -1465,12 +1495,22 @@ export class MiniAppManagementService {
     const showDiag = context.admin.role !== AdminRole.SUPPORT;
     const [health, logs] = await Promise.all([
       this.health.readiness(),
-      showDiag && this.systemLogger ? this.systemLogger.summary({ businessAccountId, sinceHours: 24 }) : Promise.resolve(null),
+      showDiag && this.systemLogger
+        ? this.systemLogger.summary({ businessAccountId, sinceHours: 24 })
+        : Promise.resolve(null),
     ]);
     const queues = showDiag
       ? await Promise.all([
-          this.prisma.indexingJob.groupBy({ by: ['status'], where: { knowledgeItem: { businessAccountId } }, _count: true }),
-          this.prisma.conversationJob.groupBy({ by: ['status'], where: { message: { conversation: { businessAccountId } } }, _count: true }),
+          this.prisma.indexingJob.groupBy({
+            by: ['status'],
+            where: { knowledgeItem: { businessAccountId } },
+            _count: true,
+          }),
+          this.prisma.conversationJob.groupBy({
+            by: ['status'],
+            where: { message: { conversation: { businessAccountId } } },
+            _count: true,
+          }),
         ])
       : null;
     return {

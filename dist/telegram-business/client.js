@@ -12,9 +12,11 @@ const apiResponseSchema = z.object({
 });
 export class TelegramBotApiClient {
     timeoutMs;
+    logger;
     #baseUrl;
-    constructor(token, timeoutMs = 15_000) {
+    constructor(token, timeoutMs = 15_000, logger) {
         this.timeoutMs = timeoutMs;
+        this.logger = logger;
         this.#baseUrl = `https://api.telegram.org/bot${token}`;
     }
     async #call(method, body, requestTimeoutMs = this.timeoutMs) {
@@ -25,6 +27,12 @@ export class TelegramBotApiClient {
         });
     }
     async #callOnce(method, body, requestTimeoutMs, externalSignal) {
+        const started = Date.now();
+        this.logger?.trace({
+            category: 'TELEGRAM',
+            method,
+            body,
+        }, `telegram api request: ${method}`);
         let response;
         try {
             response = await fetch(`${this.#baseUrl}/${method}`, {
@@ -37,12 +45,28 @@ export class TelegramBotApiClient {
             });
         }
         catch (error) {
+            const durationMs = Date.now() - started;
+            this.logger?.error({
+                category: 'TELEGRAM',
+                method,
+                durationMs,
+                err: error,
+            }, `telegram ${method} network request failed`);
             throw new AppError(`Telegram ${method} request failed`, 'TELEGRAM_NETWORK_ERROR', 502, true, {
                 cause: error,
             });
         }
-        const parsed = apiResponseSchema.safeParse(await response.json().catch(() => ({})));
+        const durationMs = Date.now() - started;
+        const rawJson = await response.json().catch(() => ({}));
+        const parsed = apiResponseSchema.safeParse(rawJson);
         if (!parsed.success) {
+            this.logger?.error({
+                category: 'TELEGRAM',
+                method,
+                statusCode: response.status,
+                durationMs,
+                rawJson,
+            }, 'telegram api invalid response payload');
             throw new AppError('Invalid Telegram API response', 'TELEGRAM_INVALID_RESPONSE', 502, true);
         }
         if (!response.ok || !parsed.data.ok) {
@@ -50,8 +74,23 @@ export class TelegramBotApiClient {
             const description = parsed.data.description ?? 'Telegram rejected the request';
             const replyWindowExpired = /24 hour|reply.*window|recent.*message/i.test(description);
             const retryable = code === 429 || (code !== undefined && code >= 500);
+            this.logger?.warn({
+                category: 'TELEGRAM',
+                method,
+                statusCode: response.status,
+                errorCode: code,
+                description,
+                durationMs,
+            }, `telegram api returned error: ${description}`);
             throw new AppError(description, replyWindowExpired ? 'TELEGRAM_REPLY_WINDOW_EXPIRED' : `TELEGRAM_API_${code ?? 'ERROR'}`, code === 429 ? 429 : 502, retryable);
         }
+        this.logger?.trace({
+            category: 'TELEGRAM',
+            method,
+            statusCode: response.status,
+            durationMs,
+            result: parsed.data.result,
+        }, `telegram api response: ${method}`);
         return parsed.data.result;
     }
     async sendMessage(chatId, text, options = {}) {
