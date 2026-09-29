@@ -1,8 +1,18 @@
 import crypto from 'node:crypto';
 import { AsyncLocalStorage } from 'node:async_hooks';
 export const systemLogStorage = new AsyncLocalStorage();
+let activeSystemLogScopeCount = 0;
 export function isInsideSystemLogger() {
-    return systemLogStorage.getStore()?.isSystemLog === true;
+    return activeSystemLogScopeCount > 0 || systemLogStorage.getStore()?.isSystemLog === true;
+}
+export async function runInSystemLogScope(fn) {
+    activeSystemLogScopeCount++;
+    try {
+        return await systemLogStorage.run({ isSystemLog: true }, fn);
+    }
+    finally {
+        activeSystemLogScopeCount = Math.max(0, activeSystemLogScopeCount - 1);
+    }
 }
 export const VALID_CATEGORIES = [
     'WEBHOOK',

@@ -31,7 +31,7 @@ function getMinLevel(a, b) {
 export function recordToSystemLogEntry(record) {
     if (record['_fromSystemLogger'] === true || isInsideSystemLogger())
         return null;
-    const rawQuery = typeof record['query'] === 'string' ? record['query'] : '';
+    const rawQuery = typeof record['query'] === 'string' ? record['query'].trim() : '';
     const rawMsg = typeof record['msg'] === 'string'
         ? record['msg']
         : typeof record['message'] === 'string'
@@ -39,6 +39,9 @@ export function recordToSystemLogEntry(record) {
             : 'system event';
     if (/systemlog/i.test(rawQuery) || /systemlog/i.test(rawMsg))
         return null;
+    if (/^(begin|commit|rollback|savepoint|release\s+savepoint|set\s+autocommit|set\s+names)\b/i.test(rawQuery)) {
+        return null;
+    }
     const levelNum = typeof record['level'] === 'number' ? record['level'] : 30;
     let level;
     if (levelNum <= 10)

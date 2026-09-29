@@ -1,4 +1,4 @@
-import { fixHints, systemLogStorage, } from './types.js';
+import { fixHints, runInSystemLogScope, } from './types.js';
 export class SystemLogRepository {
     prisma;
     config;
@@ -47,7 +47,7 @@ export class SystemLogRepository {
         const finalWhere = { ...where };
         if (and.length)
             finalWhere['AND'] = and;
-        return systemLogStorage.run({ isSystemLog: true }, async () => {
+        return runInSystemLogScope(async () => {
             const [items, total] = await Promise.all([
                 this.prisma.systemLog.findMany({
                     where: finalWhere,
@@ -67,7 +67,7 @@ export class SystemLogRepository {
         });
     }
     async get(id) {
-        return systemLogStorage.run({ isSystemLog: true }, async () => {
+        return runInSystemLogScope(async () => {
             return this.prisma.systemLog.findUnique({ where: { id } });
         });
     }
@@ -82,7 +82,7 @@ export class SystemLogRepository {
         }
         if (and.length)
             whereBase['AND'] = and;
-        return systemLogStorage.run({ isSystemLog: true }, async () => {
+        return runInSystemLogScope(async () => {
             const recent = await this.prisma.systemLog.findMany({
                 where: whereBase,
                 orderBy: { createdAt: 'desc' },
@@ -126,7 +126,7 @@ export class SystemLogRepository {
             return 0;
         this.lastPruneAt = now;
         const cutoff = new Date(now - this.config.systemLog.retentionDays * 24 * 60 * 60 * 1000);
-        return systemLogStorage.run({ isSystemLog: true }, async () => {
+        return runInSystemLogScope(async () => {
             try {
                 const res = await this.prisma.systemLog.deleteMany({
                     where: { createdAt: { lt: cutoff } },

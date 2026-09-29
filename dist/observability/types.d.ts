@@ -3,6 +3,7 @@ export declare const systemLogStorage: AsyncLocalStorage<{
     isSystemLog: boolean;
 }>;
 export declare function isInsideSystemLogger(): boolean;
+export declare function runInSystemLogScope<T>(fn: () => Promise<T> | T): Promise<T>;
 export type SystemLogLevel = 'TRACE' | 'DEBUG' | 'INFO' | 'WARN' | 'ERROR' | 'FATAL';
 export type PinoLogLevel = 'trace' | 'debug' | 'info' | 'warn' | 'error' | 'fatal' | 'silent';
 export type SystemLogCategory = 'WEBHOOK' | 'TELEGRAM' | 'AI' | 'RETRIEVAL' | 'INDEXING' | 'QDRANT' | 'WORKER' | 'HANDOFF' | 'AUTH' | 'SYSTEM' | 'CREDIT' | 'DATABASE' | 'HTTP';
