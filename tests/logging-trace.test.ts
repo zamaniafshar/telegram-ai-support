@@ -115,6 +115,114 @@ describe('Trace Logging System Verification', () => {
     expect(persistedLogs.length).toBe(1);
   });
 
+  it('prevents infinite recursion when Prisma emits BEGIN and COMMIT queries during SystemLog operations', async () => {
+    const config = testConfig({
+      LOG_LEVEL: 'trace',
+      SYSTEM_LOG_ENABLED: 'true',
+      SYSTEM_LOG_DB_LEVEL: 'trace',
+    });
+
+    const pinoLogger = createLogger(config);
+    const persistedLogs: Record<string, unknown>[] = [];
+    const onQuery = (e: { query: string; params: string; duration: number; target: string }) => {
+      const isSystemLog = isInsideSystemLogger() || /systemlog/i.test(e.query);
+      pinoLogger.trace(
+        {
+          category: 'DATABASE',
+          query: e.query,
+          params: e.params,
+          durationMs: e.duration,
+          target: e.target,
+          _fromSystemLogger: isSystemLog,
+        },
+        `db query executed (${e.duration}ms)`,
+      );
+    };
+
+    const mockPrisma = {
+      $on: vi.fn(),
+      systemLog: {
+        create: vi.fn().mockImplementation((args: { data: Record<string, unknown> }) => {
+          onQuery({
+            query: 'BEGIN',
+            params: '[]',
+            duration: 0,
+            target: 'quaint::connector::metrics',
+          });
+          onQuery({
+            query: 'INSERT INTO `SystemLog` (`id`, `message`) VALUES (?, ?)',
+            params: '["1", "test"]',
+            duration: 1,
+            target: 'quaint::connector::metrics',
+          });
+          onQuery({
+            query: 'COMMIT',
+            params: '[]',
+            duration: 0,
+            target: 'quaint::connector::metrics',
+          });
+          persistedLogs.push(args.data);
+          return Promise.resolve({ id: 'log-1', ...args.data });
+        }),
+        createMany: vi.fn().mockImplementation((args: { data: Record<string, unknown>[] }) => {
+          // When Prisma executes createMany, it wraps in BEGIN ... INSERT ... COMMIT
+          onQuery({
+            query: 'BEGIN',
+            params: '[]',
+            duration: 0,
+            target: 'quaint::connector::metrics',
+          });
+          onQuery({
+            query: 'INSERT INTO `SystemLog` (`id`, `message`) VALUES (?, ?)',
+            params: '["1", "test"]',
+            duration: 1,
+            target: 'quaint::connector::metrics',
+          });
+          onQuery({
+            query: 'COMMIT',
+            params: '[]',
+            duration: 0,
+            target: 'quaint::connector::metrics',
+          });
+          for (const item of args.data) {
+            persistedLogs.push(item);
+          }
+          return Promise.resolve({ count: args.data.length });
+        }),
+      },
+    } as unknown as PrismaClient;
+
+    pinoLogger.attachDatabase?.(mockPrisma);
+
+    // 1. Standalone BEGIN and COMMIT outside SystemLog should be ignored by SystemLogBuffer
+    onQuery({
+      query: 'BEGIN',
+      params: '[]',
+      duration: 0,
+      target: 'quaint::connector::metrics',
+    });
+    onQuery({
+      query: 'COMMIT',
+      params: '[]',
+      duration: 0,
+      target: 'quaint::connector::metrics',
+    });
+
+    // 2. Normal business query
+    onQuery({
+      query: 'SELECT * FROM `Conversation` WHERE `id` = ?',
+      params: '["conv-1"]',
+      duration: 2,
+      target: 'quaint',
+    });
+
+    await pinoLogger.flushDb?.();
+
+    // Only the business query should be persisted, without infinite loop from BEGIN/COMMIT
+    expect(persistedLogs.length).toBe(1);
+    expect(persistedLogs[0]?.['message']).toContain('SELECT * FROM `Conversation`');
+  });
+
   it('logs AI requests and responses with token usage and latency in trace mode', async () => {
     const config = testConfig({
       LOG_LEVEL: 'trace',

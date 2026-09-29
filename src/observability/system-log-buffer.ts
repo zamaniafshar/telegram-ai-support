@@ -6,9 +6,10 @@ import {
   type SystemLogEntry,
   type SystemLogLevel,
   fpOf,
+  isInsideSystemLogger,
+  runInSystemLogScope,
   safeJsonValue,
   sanitize,
-  systemLogStorage,
 } from './types.js';
 
 interface PreparedLog {
@@ -52,6 +53,8 @@ export class SystemLogBuffer {
   }
 
   enqueue(entry: SystemLogEntry): void {
+    if (isInsideSystemLogger()) return;
+
     if (this.queue.length >= this.maxQueueSize) {
       this.queue.splice(0, 100);
       if (this.logger) {
@@ -130,7 +133,10 @@ export class SystemLogBuffer {
       await new Promise((resolve) => setTimeout(resolve, 5));
     }
 
-    while (this.queue.length > 0) {
+    let iterations = 0;
+    const maxIterations = 20;
+    while (this.queue.length > 0 && iterations < maxIterations) {
+      iterations++;
       this.isFlushing = true;
       const batch = this.queue.splice(0, this.batchSize);
       try {
@@ -138,6 +144,9 @@ export class SystemLogBuffer {
       } finally {
         this.isFlushing = false;
       }
+    }
+    if (this.queue.length > 0) {
+      this.scheduleFlush();
     }
   }
 
@@ -153,7 +162,7 @@ export class SystemLogBuffer {
     }
 
     try {
-      await systemLogStorage.run({ isSystemLog: true }, async () => {
+      await runInSystemLogScope(async () => {
         const toCreate: PreparedLog[] = [];
         const dedupMs = this.config.systemLog.dedupMs;
 

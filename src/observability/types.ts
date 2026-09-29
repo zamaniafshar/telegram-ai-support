@@ -3,8 +3,19 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 
 export const systemLogStorage = new AsyncLocalStorage<{ isSystemLog: boolean }>();
 
+let activeSystemLogScopeCount = 0;
+
 export function isInsideSystemLogger(): boolean {
-  return systemLogStorage.getStore()?.isSystemLog === true;
+  return activeSystemLogScopeCount > 0 || systemLogStorage.getStore()?.isSystemLog === true;
+}
+
+export async function runInSystemLogScope<T>(fn: () => Promise<T> | T): Promise<T> {
+  activeSystemLogScopeCount++;
+  try {
+    return await systemLogStorage.run({ isSystemLog: true }, fn);
+  } finally {
+    activeSystemLogScopeCount = Math.max(0, activeSystemLogScopeCount - 1);
+  }
 }
 
 export type SystemLogLevel = 'TRACE' | 'DEBUG' | 'INFO' | 'WARN' | 'ERROR' | 'FATAL';
