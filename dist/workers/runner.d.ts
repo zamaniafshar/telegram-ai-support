@@ -5,7 +5,7 @@ import type { ConversationProcessor } from '../conversations/processor.js';
 import type { HandoffService } from '../handoffs/service.js';
 import type { NanoGptCreditMonitor } from '../ai/nanogpt-credit.js';
 import type { AdminNotifier } from '../telegram-admin/notifier.js';
-import type { SystemLogger } from '../observability/system-logger.js';
+import type { SystemLogRepository } from '../observability/system-log-repository.js';
 export declare class WorkerRunner {
     private readonly indexing;
     private readonly conversations;
@@ -14,8 +14,8 @@ export declare class WorkerRunner {
     private readonly notifications;
     private readonly config;
     private readonly logger;
-    private readonly systemLogger?;
+    private readonly systemLogRepo?;
     readonly workerId: string;
-    constructor(indexing: IndexingService, conversations: ConversationProcessor, handoffs: HandoffService, creditMonitor: NanoGptCreditMonitor, notifications: AdminNotifier, config: AppConfig, logger: Logger, systemLogger?: SystemLogger | undefined);
+    constructor(indexing: IndexingService, conversations: ConversationProcessor, handoffs: HandoffService, creditMonitor: NanoGptCreditMonitor, notifications: AdminNotifier, config: AppConfig, logger: Logger, systemLogRepo?: SystemLogRepository | undefined);
     run(signal: AbortSignal): Promise<void>;
 }

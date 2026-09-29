@@ -12,13 +12,11 @@ export class LongPollingRunner {
     allowedUpdates;
     handler;
     logger;
-    systemLogger;
-    constructor(telegram, allowedUpdates, handler, logger, systemLogger) {
+    constructor(telegram, allowedUpdates, handler, logger) {
         this.telegram = telegram;
         this.allowedUpdates = allowedUpdates;
         this.handler = handler;
         this.logger = logger;
-        this.systemLogger = systemLogger;
     }
     async run(signal) {
         let offset;
@@ -73,23 +71,14 @@ export class LongPollingRunner {
                     isConflict,
                     consecutiveErrors,
                     backoffMs,
-                }, isConflict
-                    ? 'long polling conflict detected: check for duplicate bot instances or active webhooks'
-                    : 'long polling cycle failed, backing off before retry');
-                this.systemLogger?.error({
                     category: 'TELEGRAM',
-                    message: isConflict ? 'long polling conflict detected' : 'long polling cycle failed',
                     messageFa: isConflict
                         ? 'دو نمونه ربات همزمان اجرا شده'
                         : 'دریافت پیام از تلگرام با خطا مواجه شد',
                     errorCode: isConflict ? 'POLLING_CONFLICT' : 'TELEGRAM_NETWORK_ERROR',
-                    metadata: {
-                        isConflict,
-                        consecutiveErrors,
-                        backoffMs,
-                        error: error instanceof Error ? error.message : String(error),
-                    },
-                });
+                }, isConflict
+                    ? 'long polling conflict detected: check for duplicate bot instances or active webhooks'
+                    : 'long polling cycle failed, backing off before retry');
                 await delay(backoffMs, undefined, { signal }).catch(() => undefined);
             }
         }

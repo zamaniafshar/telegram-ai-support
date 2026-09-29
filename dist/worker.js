@@ -10,5 +10,6 @@ const abortController = new AbortController();
 process.once('SIGTERM', () => abortController.abort());
 process.once('SIGINT', () => abortController.abort());
 await services.worker.run(abortController.signal);
+await logger.flushDb?.();
 await services.prisma.$disconnect();
 //# sourceMappingURL=worker.js.map

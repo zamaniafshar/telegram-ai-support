@@ -29,11 +29,8 @@ import {
   type QueuePolicy,
 } from '../ai/availability.js';
 import type { AdminNotifier } from '../telegram-admin/notifier.js';
-import type {
-  SystemLogger,
-  SystemLogCategory,
-  SystemLogLevel,
-} from '../observability/system-logger.js';
+import type { SystemLogCategory, SystemLogLevel } from '../observability/types.js';
+import type { SystemLogRepository } from '../observability/system-log-repository.js';
 
 const adminSelect = {
   id: true,
@@ -57,7 +54,7 @@ export class MiniAppManagementService {
     private readonly config: AppConfig,
     private readonly availability?: AiAvailabilityService,
     private readonly notifier?: AdminNotifier,
-    private readonly systemLogger?: SystemLogger,
+    private readonly systemLogRepo?: SystemLogRepository,
   ) {}
 
   businesses(context: MiniAppSessionContext) {
@@ -1440,7 +1437,7 @@ export class MiniAppManagementService {
   ) {
     requireBusiness(context, businessAccountId);
     requireRole(context, AdminRole.ADMIN);
-    if (!this.systemLogger) throw new ResourceUnavailableError();
+    if (!this.systemLogRepo) throw new ResourceUnavailableError();
     const levels: SystemLogLevel[] = ['TRACE', 'DEBUG', 'INFO', 'WARN', 'ERROR', 'FATAL'];
     const cats: SystemLogCategory[] = [
       'WEBHOOK',
@@ -1465,7 +1462,7 @@ export class MiniAppManagementService {
       : 20;
     const from = filters.from ? new Date(filters.from) : null;
     const to = filters.to ? new Date(filters.to) : null;
-    return this.systemLogger.list({
+    return this.systemLogRepo.list({
       businessAccountId,
       level,
       category,
@@ -1481,8 +1478,8 @@ export class MiniAppManagementService {
   async systemLogDetail(context: MiniAppSessionContext, businessAccountId: string, id: string) {
     requireBusiness(context, businessAccountId);
     requireRole(context, AdminRole.ADMIN);
-    if (!this.systemLogger) throw new ResourceUnavailableError();
-    const item = await this.systemLogger.get(id);
+    if (!this.systemLogRepo) throw new ResourceUnavailableError();
+    const item = await this.systemLogRepo.get(id);
     if (!item) throw new ResourceUnavailableError();
     const row = item as { businessAccountId?: string | null };
     if (row.businessAccountId && row.businessAccountId !== businessAccountId)
@@ -1495,8 +1492,8 @@ export class MiniAppManagementService {
     const showDiag = context.admin.role !== AdminRole.SUPPORT;
     const [health, logs] = await Promise.all([
       this.health.readiness(),
-      showDiag && this.systemLogger
-        ? this.systemLogger.summary({ businessAccountId, sinceHours: 24 })
+      showDiag && this.systemLogRepo
+        ? this.systemLogRepo.summary({ businessAccountId, sinceHours: 24 })
         : Promise.resolve(null),
     ]);
     const queues = showDiag

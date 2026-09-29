@@ -1,8 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { PrismaClient, SystemLogLevel, SystemLogCategory } from '@prisma/client';
-import { SystemLogger } from '../src/observability/system-logger.js';
 import { createLogger } from '../src/observability/logger.js';
-import { silentLogger, testConfig } from './helpers.js';
+import { SystemLogRepository } from '../src/observability/system-log-repository.js';
+import { testConfig } from './helpers.js';
 
 interface LogItem {
   id: string;
@@ -20,8 +20,8 @@ interface LogItem {
   updatedAt: Date;
 }
 
-describe('SystemLogger', () => {
-  it('logs errors and queries them with filters and pagination', async () => {
+describe('SystemLogRepository & Unified Logging Pipeline', () => {
+  it('logs errors via unified logger and queries them with filters and pagination via repository', async () => {
     const logs: LogItem[] = [];
     const mockPrisma = {
       systemLog: {
@@ -80,22 +80,26 @@ describe('SystemLogger', () => {
       SYSTEM_LOG_DEDUP_MS: '5000',
     });
 
-    const logger = new SystemLogger(mockPrisma, silentLogger, config);
+    const logger = createLogger(config, mockPrisma);
+    const repo = new SystemLogRepository(mockPrisma, config, logger);
 
-    await logger.log({
-      level: 'ERROR',
-      category: 'TELEGRAM',
-      message: 'Network timeout to api.telegram.org',
-      messageFa: 'خطای ارتباط با تلگرام',
-      errorCode: 'TELEGRAM_NETWORK_ERROR',
-      businessAccountId: 'biz-1',
-    });
+    logger.error(
+      {
+        category: 'TELEGRAM',
+        messageFa: 'خطای ارتباط با تلگرام',
+        errorCode: 'TELEGRAM_NETWORK_ERROR',
+        businessAccountId: 'biz-1',
+      },
+      'Network timeout to api.telegram.org',
+    );
+
+    await logger.flushDb?.();
 
     expect(logs).toHaveLength(1);
     expect(logs[0]?.level).toBe('ERROR');
     expect(logs[0]?.category).toBe('TELEGRAM');
 
-    const result = await logger.list({
+    const result = await repo.list({
       businessAccountId: 'biz-1',
       page: 1,
       pageSize: 10,
@@ -106,7 +110,7 @@ describe('SystemLogger', () => {
     expect(result.page).toBe(1);
   });
 
-  it('captures operational Pino logs when SYSTEM_LOG_DB_LEVEL=trace', async () => {
+  it('captures operational logs into database when SYSTEM_LOG_DB_LEVEL=trace', async () => {
     const logs: LogItem[] = [];
     const mockPrisma = {
       systemLog: {
@@ -130,9 +134,7 @@ describe('SystemLogger', () => {
       SYSTEM_LOG_DEDUP_MS: '300000',
     });
 
-    const pinoLogger = createLogger(config);
-    const systemLogger = new SystemLogger(mockPrisma, pinoLogger, config);
-    systemLogger.attachToLogger(pinoLogger);
+    const pinoLogger = createLogger(config, mockPrisma);
 
     pinoLogger.trace('trace step');
     pinoLogger.debug('debug step');
@@ -150,9 +152,7 @@ describe('SystemLogger', () => {
       'request completed',
     );
 
-    await new Promise((resolve) => {
-      setTimeout(resolve, 50);
-    });
+    await pinoLogger.flushDb?.();
 
     expect(logs.map((l) => l.level)).toEqual(['TRACE', 'DEBUG', 'INFO', 'INFO']);
 
@@ -186,16 +186,12 @@ describe('SystemLogger', () => {
       SYSTEM_LOG_DEDUP_MS: '300000',
     });
 
-    const pinoLogger = createLogger(config);
-    const systemLogger = new SystemLogger(mockPrisma, pinoLogger, config);
-    systemLogger.attachToLogger(pinoLogger);
+    const pinoLogger = createLogger(config, mockPrisma);
 
     pinoLogger.info('repeating info message');
     pinoLogger.info('repeating info message');
 
-    await new Promise((resolve) => {
-      setTimeout(resolve, 50);
-    });
+    await pinoLogger.flushDb?.();
 
     expect(logs).toHaveLength(2);
   });

@@ -1,5 +1,5 @@
 import { PrismaClient } from '@prisma/client';
-import { isInsideSystemLogger } from '../observability/system-logger.js';
+import { isInsideSystemLogger } from '../observability/types.js';
 export function createPrismaClient(config, logger) {
     const prisma = new PrismaClient({
         log: [

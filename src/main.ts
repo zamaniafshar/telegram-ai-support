@@ -37,7 +37,6 @@ if (config.telegram.transport === 'polling') {
       await services.businessIngestor.ingest(update, randomUUID());
     },
     logger,
-    services.systemLogger,
   );
   const adminPolling = new LongPollingRunner(
     services.adminTelegram,
@@ -46,7 +45,6 @@ if (config.telegram.transport === 'polling') {
       await services.adminHandler.handle(update, randomUUID());
     },
     logger,
-    services.systemLogger,
   );
   backgroundTasks.push(
     businessPolling.run(abortController.signal),
@@ -69,6 +67,7 @@ async function shutdown(signal: string): Promise<void> {
   const timeout = new Promise<void>((resolve) => setTimeout(resolve, config.shutdownTimeoutMs));
   await Promise.race([Promise.allSettled(backgroundTasks).then(() => undefined), timeout]);
   await app.close();
+  await logger.flushDb?.();
   await services.prisma.$disconnect();
   logger.info('graceful shutdown completed');
 }

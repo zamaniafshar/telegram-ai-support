@@ -11,7 +11,7 @@ import { ConversationProcessor } from './conversations/processor.js';
 import { KnowledgeService } from './knowledge/service.js';
 import { AdminAuthorizer } from './security/admin-authorization.js';
 import { HealthService } from './observability/health.js';
-import { SystemLogger } from './observability/system-logger.js';
+import { SystemLogRepository } from './observability/system-log-repository.js';
 import { BusinessUpdateIngestor } from './telegram-business/ingest.js';
 import { AdminBotHandler } from './telegram-admin/handler.js';
 import { WorkerRunner } from './workers/runner.js';
@@ -21,8 +21,8 @@ import { MiniAppManagementService } from './mini-app/service.js';
 import { AiAvailabilityService } from './ai/availability.js';
 export function createServices(config, logger, prisma) {
     const database = prisma ?? createPrismaClient(config, logger);
-    const systemLogger = new SystemLogger(database, logger, config);
-    systemLogger.attachToLogger(logger);
+    logger.attachDatabase?.(database);
+    const systemLogRepo = new SystemLogRepository(database, config, logger);
     const businessTelegram = new TelegramBotApiClient(config.telegram.businessBotToken, 15_000, logger);
     const adminTelegram = new TelegramBotApiClient(config.telegram.adminBotToken, 15_000, logger);
     const notifier = new AdminNotifier(database, adminTelegram, config, logger);
@@ -33,17 +33,17 @@ export function createServices(config, logger, prisma) {
     const retrieval = new RetrievalService(database, openai, vectors, config, logger);
     const handoffs = new HandoffService(database, config, logger, notifier);
     const indexing = new IndexingService(database, openai, vectors, config, logger, notifier);
-    const messenger = new BusinessMessenger(database, businessTelegram, config, logger, systemLogger);
+    const messenger = new BusinessMessenger(database, businessTelegram, config, logger);
     const aiAvailability = new AiAvailabilityService(database, config.business.defaultTimezone);
-    const conversations = new ConversationProcessor(database, retrieval, openai, handoffs, messenger, notifier, aiAvailability, config, logger, systemLogger);
+    const conversations = new ConversationProcessor(database, retrieval, openai, handoffs, messenger, notifier, aiAvailability, config, logger);
     const knowledge = new KnowledgeService(database, config);
     const authorizer = new AdminAuthorizer(database);
     const health = new HealthService(database, vectors, businessTelegram, adminTelegram, config);
     const miniAppAuth = new MiniAppAuthService(database, config);
-    const miniAppManagement = new MiniAppManagementService(database, knowledge, handoffs, health, config, aiAvailability, notifier, systemLogger);
+    const miniAppManagement = new MiniAppManagementService(database, knowledge, handoffs, health, config, aiAvailability, notifier, systemLogRepo);
     const businessIngestor = new BusinessUpdateIngestor(database, businessTelegram, config, logger);
     const adminHandler = new AdminBotHandler(database, adminTelegram, authorizer, config.telegram.miniAppUrl, logger);
-    const worker = new WorkerRunner(indexing, conversations, handoffs, nanoGptCredit, notifier, config, logger, systemLogger);
+    const worker = new WorkerRunner(indexing, conversations, handoffs, nanoGptCredit, notifier, config, logger, systemLogRepo);
     return {
         prisma: database,
         businessTelegram,
@@ -67,7 +67,7 @@ export function createServices(config, logger, prisma) {
         businessIngestor,
         adminHandler,
         worker,
-        systemLogger,
+        systemLogRepo,
     };
 }
 //# sourceMappingURL=app.js.map

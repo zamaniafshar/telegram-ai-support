@@ -86,15 +86,12 @@ export async function buildServer(config, services, logger) {
     }, async (request, reply) => {
         const header = request.headers['x-telegram-bot-api-secret-token'];
         if (!validWebhookSecret(Array.isArray(header) ? header[0] : header, config.telegram.businessWebhookSecret)) {
-            request.log.warn({ path: config.telegram.businessWebhookPath }, 'business webhook unauthorized');
-            services.systemLogger.warn({
+            request.log.warn({
                 category: 'WEBHOOK',
-                message: 'business webhook unauthorized - secret mismatch',
                 messageFa: 'توکن وب‌هوک تجاری اشتباه است',
                 errorCode: 'WEBHOOK_UNAUTHORIZED',
-                correlationId: request.id,
-                metadata: { path: config.telegram.businessWebhookPath },
-            });
+                path: config.telegram.businessWebhookPath,
+            }, 'business webhook unauthorized - secret mismatch');
             return reply.code(401).send({ error: 'unauthorized' });
         }
         let update;
@@ -102,14 +99,12 @@ export async function buildServer(config, services, logger) {
             update = telegramUpdateSchema.parse(request.body);
         }
         catch (err) {
-            services.systemLogger.warn({
+            request.log.warn({
                 category: 'WEBHOOK',
-                message: 'business webhook invalid payload',
                 messageFa: 'بدنه وب‌هوک تجاری نامعتبر بود',
                 errorCode: 'WEBHOOK_INVALID_PAYLOAD',
-                correlationId: request.id,
-                metadata: { error: err instanceof Error ? err.message : String(err) },
-            });
+                err,
+            }, 'business webhook invalid payload');
             throw err;
         }
         const result = await services.businessIngestor.ingest(update, request.id);
@@ -134,7 +129,6 @@ export async function buildServer(config, services, logger) {
     });
     app.setNotFoundHandler(async (_request, reply) => reply.code(404).send({ error: 'not_found' }));
     app.setErrorHandler(async (error, request, reply) => {
-        request.log.error({ err: error }, 'request failed');
         const sc = typeof error === 'object' &&
             error !== null &&
             'statusCode' in error &&
@@ -142,14 +136,16 @@ export async function buildServer(config, services, logger) {
             ? error.statusCode
             : 500;
         if (sc >= 500) {
-            services.systemLogger.error({
+            request.log.error({
+                err: error,
                 category: 'HTTP',
-                message: `request failed ${request.method} ${request.url}: ${error instanceof Error ? error.message : String(error)}`,
                 messageFa: 'درخواست با خطای سرور مواجه شد',
                 errorCode: 'INTERNAL_ERROR',
-                correlationId: request.id,
-                metadata: { method: request.method, url: request.url, statusCode: sc },
-            });
+                statusCode: sc,
+            }, `request failed ${request.method} ${request.url}: ${error instanceof Error ? error.message : String(error)}`);
+        }
+        else {
+            request.log.warn({ err: error, statusCode: sc }, 'request client error');
         }
         const genericStatus = typeof error === 'object' &&
             error !== null &&

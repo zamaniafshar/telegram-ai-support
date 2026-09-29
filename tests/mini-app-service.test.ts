@@ -140,4 +140,74 @@ describe('Mini App management service', () => {
 
     expect(result.messages.map((message) => message.id)).toEqual(['newer', 'older']);
   });
+
+  it('delegates systemLogs, systemLogDetail, and diagnostics to SystemLogRepository', async () => {
+    const mockRepo = {
+      list: vi.fn().mockResolvedValue({
+        items: [{ id: 'log-1', message: 'test log' }],
+        total: 1,
+        page: 1,
+        pageSize: 20,
+        totalPages: 1,
+      }),
+      get: vi.fn().mockResolvedValue({
+        id: 'log-1',
+        businessAccountId: 'business-1',
+        message: 'test log',
+      }),
+      summary: vi.fn().mockResolvedValue({
+        byLevel: { ERROR: 1 },
+        byCategory: { AI: 1 },
+        topErrors: [],
+        recentErrors: [],
+      }),
+    };
+
+    const prisma = {
+      indexingJob: { groupBy: vi.fn().mockResolvedValue([]) },
+      conversationJob: { groupBy: vi.fn().mockResolvedValue([]) },
+    };
+
+    const health = {
+      readiness: vi.fn().mockResolvedValue({ status: 'ok' }),
+    };
+
+    const service = new MiniAppManagementService(
+      prisma as never,
+      {} as never,
+      {} as never,
+      health as never,
+      testConfig(),
+      undefined,
+      undefined,
+      mockRepo as never,
+    );
+
+    const adminContext = {
+      admin: { role: AdminRole.ADMIN },
+      businessAccess: [
+        { businessAccountId: 'business-1', businessAccount: { id: 'business-1', isActive: true } },
+      ],
+    };
+
+    // 1. systemLogs
+    const listResult = await service.systemLogs(adminContext as never, 'business-1', { page: '1' });
+    expect(mockRepo.list).toHaveBeenCalledWith(
+      expect.objectContaining({ businessAccountId: 'business-1', page: 1, pageSize: 20 }),
+    );
+    expect(listResult.items).toHaveLength(1);
+
+    // 2. systemLogDetail
+    const detail = await service.systemLogDetail(adminContext as never, 'business-1', 'log-1');
+    expect(mockRepo.get).toHaveBeenCalledWith('log-1');
+    expect(detail).toEqual(expect.objectContaining({ id: 'log-1' }));
+
+    // 3. diagnostics
+    const diag = await service.diagnostics(adminContext as never, 'business-1');
+    expect(mockRepo.summary).toHaveBeenCalledWith({
+      businessAccountId: 'business-1',
+      sinceHours: 24,
+    });
+    expect(diag.logs).toEqual(expect.objectContaining({ byLevel: { ERROR: 1 } }));
+  });
 });

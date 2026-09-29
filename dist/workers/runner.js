@@ -8,9 +8,9 @@ export class WorkerRunner {
     notifications;
     config;
     logger;
-    systemLogger;
+    systemLogRepo;
     workerId = `worker:${randomUUID()}`;
-    constructor(indexing, conversations, handoffs, creditMonitor, notifications, config, logger, systemLogger) {
+    constructor(indexing, conversations, handoffs, creditMonitor, notifications, config, logger, systemLogRepo) {
         this.indexing = indexing;
         this.conversations = conversations;
         this.handoffs = handoffs;
@@ -18,7 +18,7 @@ export class WorkerRunner {
         this.notifications = notifications;
         this.config = config;
         this.logger = logger;
-        this.systemLogger = systemLogger;
+        this.systemLogRepo = systemLogRepo;
     }
     async run(signal) {
         this.logger.info({ workerId: this.workerId }, 'durable worker started');
@@ -36,20 +36,16 @@ export class WorkerRunner {
                     await delay(50, undefined, { signal }).catch(() => undefined);
                     continue;
                 }
-                await this.systemLogger?.pruneIfDue();
+                await this.systemLogRepo?.pruneIfDue();
             }
             catch (error) {
-                this.logger.error({ err: error, workerId: this.workerId }, 'worker cycle failed');
-                this.systemLogger?.error({
+                this.logger.error({
+                    err: error,
+                    workerId: this.workerId,
                     category: 'WORKER',
-                    message: `worker cycle failed: ${error instanceof Error ? error.message : String(error)}`,
                     messageFa: 'پردازش پس‌زمینه با خطا مواجه شد',
                     errorCode: 'WORKER_FAILED',
-                    metadata: {
-                        workerId: this.workerId,
-                        error: error instanceof Error ? error.message : String(error),
-                    },
-                });
+                }, `worker cycle failed: ${error instanceof Error ? error.message : String(error)}`);
             }
             await delay(this.config.worker.pollIntervalMs, undefined, { signal }).catch(() => undefined);
         }

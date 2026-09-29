@@ -23,8 +23,8 @@ export class MiniAppManagementService {
     config;
     availability;
     notifier;
-    systemLogger;
-    constructor(prisma, knowledge, handoffs, health, config, availability, notifier, systemLogger) {
+    systemLogRepo;
+    constructor(prisma, knowledge, handoffs, health, config, availability, notifier, systemLogRepo) {
         this.prisma = prisma;
         this.knowledge = knowledge;
         this.handoffs = handoffs;
@@ -32,7 +32,7 @@ export class MiniAppManagementService {
         this.config = config;
         this.availability = availability;
         this.notifier = notifier;
-        this.systemLogger = systemLogger;
+        this.systemLogRepo = systemLogRepo;
     }
     businesses(context) {
         return context.businessAccess
@@ -1172,7 +1172,7 @@ export class MiniAppManagementService {
     async systemLogs(context, businessAccountId, filters) {
         requireBusiness(context, businessAccountId);
         requireRole(context, AdminRole.ADMIN);
-        if (!this.systemLogger)
+        if (!this.systemLogRepo)
             throw new ResourceUnavailableError();
         const levels = ['TRACE', 'DEBUG', 'INFO', 'WARN', 'ERROR', 'FATAL'];
         const cats = [
@@ -1198,7 +1198,7 @@ export class MiniAppManagementService {
             : 20;
         const from = filters.from ? new Date(filters.from) : null;
         const to = filters.to ? new Date(filters.to) : null;
-        return this.systemLogger.list({
+        return this.systemLogRepo.list({
             businessAccountId,
             level,
             category,
@@ -1213,9 +1213,9 @@ export class MiniAppManagementService {
     async systemLogDetail(context, businessAccountId, id) {
         requireBusiness(context, businessAccountId);
         requireRole(context, AdminRole.ADMIN);
-        if (!this.systemLogger)
+        if (!this.systemLogRepo)
             throw new ResourceUnavailableError();
-        const item = await this.systemLogger.get(id);
+        const item = await this.systemLogRepo.get(id);
         if (!item)
             throw new ResourceUnavailableError();
         const row = item;
@@ -1228,8 +1228,8 @@ export class MiniAppManagementService {
         const showDiag = context.admin.role !== AdminRole.SUPPORT;
         const [health, logs] = await Promise.all([
             this.health.readiness(),
-            showDiag && this.systemLogger
-                ? this.systemLogger.summary({ businessAccountId, sinceHours: 24 })
+            showDiag && this.systemLogRepo
+                ? this.systemLogRepo.summary({ businessAccountId, sinceHours: 24 })
                 : Promise.resolve(null),
         ]);
         const queues = showDiag

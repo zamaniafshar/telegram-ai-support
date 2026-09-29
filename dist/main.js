@@ -27,10 +27,10 @@ if (config.telegram.transport === 'polling') {
         'deleted_business_messages',
     ], async (update) => {
         await services.businessIngestor.ingest(update, randomUUID());
-    }, logger, services.systemLogger);
+    }, logger);
     const adminPolling = new LongPollingRunner(services.adminTelegram, ['message'], async (update) => {
         await services.adminHandler.handle(update, randomUUID());
-    }, logger, services.systemLogger);
+    }, logger);
     backgroundTasks.push(businessPolling.run(abortController.signal), adminPolling.run(abortController.signal));
 }
 await app.listen({ host: config.http.host, port: config.http.port });
@@ -45,6 +45,7 @@ async function shutdown(signal) {
     const timeout = new Promise((resolve) => setTimeout(resolve, config.shutdownTimeoutMs));
     await Promise.race([Promise.allSettled(backgroundTasks).then(() => undefined), timeout]);
     await app.close();
+    await logger.flushDb?.();
     await services.prisma.$disconnect();
     logger.info('graceful shutdown completed');
 }

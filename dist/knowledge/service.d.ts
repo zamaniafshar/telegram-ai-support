@@ -22,10 +22,10 @@ export declare class KnowledgeService {
     list(businessAccountId: string, page?: number, pageSize?: number, query?: string): Promise<{
         items: {
             businessAccountId: string;
-            createdAt: Date;
             id: string;
-            updatedAt: Date;
             isActive: boolean;
+            createdAt: Date;
+            updatedAt: Date;
             title: string;
             description: string;
             version: number;

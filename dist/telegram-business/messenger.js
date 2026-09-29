@@ -9,13 +9,11 @@ export class BusinessMessenger {
     telegram;
     config;
     logger;
-    systemLogger;
-    constructor(prisma, telegram, config, logger, systemLogger) {
+    constructor(prisma, telegram, config, logger) {
         this.prisma = prisma;
         this.telegram = telegram;
         this.config = config;
         this.logger = logger;
-        this.systemLogger = systemLogger;
     }
     async sendAiAnswer(conversationId, text, sourceMessageId) {
         if (await this.prisma.message.findUnique({ where: { sourceMessageId } })) {
@@ -192,16 +190,16 @@ export class BusinessMessenger {
         catch (error) {
             const code = error instanceof AppError ? error.code : 'TELEGRAM_SEND_FAILED';
             const isWindow = code === 'TELEGRAM_REPLY_WINDOW_EXPIRED';
-            this.systemLogger?.[isWindow ? 'warn' : 'error']({
+            const logFn = isWindow
+                ? this.logger.warn.bind(this.logger)
+                : this.logger.error.bind(this.logger);
+            logFn({
                 category: 'TELEGRAM',
-                message: `sendMessage failed: ${code} ${error instanceof Error ? error.message : String(error)}`,
                 messageFa: isWindow ? 'پنجره پاسخ تلگرام منقضی شده' : 'ارسال پیام به تلگرام ناموفق بود',
                 errorCode: code,
-                metadata: {
-                    conversationId: options.conversationId,
-                    error: error instanceof Error ? error.message : String(error),
-                },
-            });
+                conversationId: options.conversationId,
+                err: error,
+            }, `sendMessage failed: ${code} ${error instanceof Error ? error.message : String(error)}`);
             if (isTelegramEntityParseError(error)) {
                 this.logger.warn({ conversationId: options.conversationId, err: error }, 'Telegram HTML parsing failed, falling back to plain text');
                 const plain = stripHtml(options.text);

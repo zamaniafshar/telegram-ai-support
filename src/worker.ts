@@ -15,4 +15,5 @@ process.once('SIGTERM', () => abortController.abort());
 process.once('SIGINT', () => abortController.abort());
 
 await services.worker.run(abortController.signal);
+await logger.flushDb?.();
 await services.prisma.$disconnect();

@@ -1,11 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { PrismaClient } from '@prisma/client';
 import { createLogger } from '../src/observability/logger.js';
-import {
-  SystemLogger,
-  safeJsonValue,
-  isInsideSystemLogger,
-} from '../src/observability/system-logger.js';
+import { safeJsonValue, isInsideSystemLogger } from '../src/observability/types.js';
 import { createPrismaClient } from '../src/database/prisma.js';
 import { OpenAiAdapter } from '../src/ai/openai.js';
 import { TelegramBotApiClient } from '../src/telegram-business/client.js';
@@ -74,8 +70,7 @@ describe('Trace Logging System Verification', () => {
       },
     } as unknown as PrismaClient;
 
-    const systemLogger = new SystemLogger(mockPrisma, pinoLogger, config);
-    systemLogger.attachToLogger(pinoLogger);
+    pinoLogger.attachDatabase?.(mockPrisma);
 
     createPrismaClient(config, pinoLogger);
 
@@ -109,6 +104,7 @@ describe('Trace Logging System Verification', () => {
     });
 
     await new Promise((resolve) => setTimeout(resolve, 50));
+    await pinoLogger.flushDb?.();
 
     // The business query should be persisted
     expect(persistedLogs.length).toBe(1);
