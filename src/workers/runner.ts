@@ -27,13 +27,11 @@ export class WorkerRunner {
     this.logger.info({ workerId: this.workerId }, 'durable worker started');
     while (!signal.aborted) {
       try {
-        const [indexing, conversations, expired, creditChecked, notifications] = await Promise.all([
-          this.indexing.runBatch(this.workerId),
-          this.conversations.runBatch(this.workerId),
-          this.handoffs.expireBatch(),
-          this.creditMonitor.runDailyCheckIfDue(this.workerId),
-          this.notifications.runBatch(this.workerId),
-        ]);
+        const indexing = await this.indexing.runBatch(this.workerId);
+        const conversations = await this.conversations.runBatch(this.workerId);
+        const expired = await this.handoffs.expireBatch();
+        const creditChecked = await this.creditMonitor.runDailyCheckIfDue(this.workerId);
+        const notifications = await this.notifications.runBatch(this.workerId);
         if (indexing + conversations + expired + notifications > 0) {
           this.logger.debug(
             { indexing, conversations, expired, creditChecked, notifications },
