@@ -26,7 +26,7 @@
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate deploy",
     "prisma:migrate:dev": "prisma migrate dev",
-    "prisma:seed": "tsx prisma/seed.ts",
+    "prisma:seed": "node dist/cli/prisma-seed.js",
     "mysql:setup": "tsx src/cli/mysql-setup.ts",
     "qdrant:init": "tsx src/cli/qdrant-init.ts",
     "qdrant:reindex": "tsx src/cli/qdrant-reindex.ts",
