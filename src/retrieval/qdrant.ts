@@ -18,6 +18,25 @@ export interface VectorPoint {
   };
 }
 
+export interface ExactVectorPoint {
+  id: string;
+  vector: number[];
+  payload: {
+    businessAccountId: string;
+    exactAnswerId: string;
+    exactQuestionId: string;
+    questionText: string;
+    isActive: boolean;
+  };
+}
+
+export interface ExactQuestionMatch {
+  exactAnswerId: string;
+  exactQuestionId: string;
+  questionText: string;
+  score: number;
+}
+
 export interface VectorStore {
   ensureCollection(dimensions: number): Promise<void>;
   recreateCollection(dimensions: number): Promise<void>;
@@ -31,6 +50,14 @@ export interface VectorStore {
     minScore: number;
     limit: number;
   }): Promise<RetrievalResult[]>;
+  upsertExactQuestions(points: ExactVectorPoint[]): Promise<void>;
+  removeExactQuestions(pointIds: string[]): Promise<void>;
+  searchExactQuestions(input: {
+    vector: number[];
+    businessAccountId: string;
+    threshold: number;
+    limit?: number;
+  }): Promise<ExactQuestionMatch[]>;
 }
 
 export class QdrantVectorStore implements VectorStore {
@@ -90,12 +117,55 @@ export class QdrantVectorStore implements VectorStore {
           if (!(error instanceof Error) || !/already exists/i.test(error.message)) throw error;
         });
     }
+
+    const exactCollection = this.config.qdrant.exactQuestionsCollection;
+    if (!collections.collections.some((item) => item.name === exactCollection)) {
+      await this.client.createCollection(exactCollection, {
+        vectors: { size: dimensions, distance: 'Cosine' },
+        on_disk_payload: true,
+      });
+    } else {
+      const info = await this.client.getCollection(exactCollection);
+      const vectors = info.config.params.vectors;
+      const actualSize =
+        vectors && 'size' in vectors && typeof vectors.size === 'number' ? vectors.size : undefined;
+      if (actualSize !== undefined && actualSize !== dimensions) {
+        throw new Error(
+          `Qdrant exact questions collection dimension ${actualSize} does not match embedding dimension ${dimensions}`,
+        );
+      }
+    }
+
+    const exactPayloadIndexes = [
+      { fieldName: 'businessAccountId', schema: 'keyword' },
+      { fieldName: 'exactAnswerId', schema: 'keyword' },
+      { fieldName: 'exactQuestionId', schema: 'keyword' },
+      { fieldName: 'isActive', schema: 'bool' },
+    ] as const;
+    for (const { fieldName, schema } of exactPayloadIndexes) {
+      await this.client
+        .createPayloadIndex(exactCollection, {
+          field_name: fieldName,
+          field_schema: schema,
+          wait: true,
+        })
+        .catch((error: unknown) => {
+          if (!(error instanceof Error) || !/already exists/i.test(error.message)) throw error;
+        });
+    }
   }
 
   async recreateCollection(dimensions: number): Promise<void> {
     const collections = await this.client.getCollections();
     if (collections.collections.some((item) => item.name === this.config.qdrant.collection)) {
       await this.client.deleteCollection(this.config.qdrant.collection);
+    }
+    if (
+      collections.collections.some(
+        (item) => item.name === this.config.qdrant.exactQuestionsCollection,
+      )
+    ) {
+      await this.client.deleteCollection(this.config.qdrant.exactQuestionsCollection);
     }
     await this.ensureCollection(dimensions);
   }
@@ -172,6 +242,61 @@ export class QdrantVectorStore implements VectorStore {
           content: payload['content'],
           score: point.score,
           knowledgeVersion: payload['knowledgeVersion'],
+        },
+      ];
+    });
+  }
+
+  async upsertExactQuestions(points: ExactVectorPoint[]): Promise<void> {
+    if (points.length === 0) return;
+    await this.client.upsert(this.config.qdrant.exactQuestionsCollection, {
+      wait: true,
+      points,
+    });
+  }
+
+  async removeExactQuestions(pointIds: string[]): Promise<void> {
+    if (pointIds.length === 0) return;
+    await this.client.delete(this.config.qdrant.exactQuestionsCollection, {
+      wait: true,
+      points: pointIds,
+    });
+  }
+
+  async searchExactQuestions(input: {
+    vector: number[];
+    businessAccountId: string;
+    threshold: number;
+    limit?: number;
+  }): Promise<ExactQuestionMatch[]> {
+    const points = await this.client.search(this.config.qdrant.exactQuestionsCollection, {
+      vector: input.vector,
+      limit: input.limit ?? 1,
+      score_threshold: input.threshold,
+      with_payload: true,
+      filter: {
+        must: [
+          { key: 'businessAccountId', match: { value: input.businessAccountId } },
+          { key: 'isActive', match: { value: true } },
+        ],
+      },
+    });
+    return points.flatMap((point) => {
+      const payload = point.payload;
+      if (
+        !payload ||
+        typeof payload['exactAnswerId'] !== 'string' ||
+        typeof payload['exactQuestionId'] !== 'string' ||
+        typeof payload['questionText'] !== 'string'
+      ) {
+        return [];
+      }
+      return [
+        {
+          exactAnswerId: payload['exactAnswerId'],
+          exactQuestionId: payload['exactQuestionId'],
+          questionText: payload['questionText'],
+          score: point.score,
         },
       ];
     });

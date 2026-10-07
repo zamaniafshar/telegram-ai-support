@@ -19,6 +19,8 @@ import { NanoGptBalanceClient, NanoGptCreditMonitor } from './ai/nanogpt-credit.
 import { MiniAppAuthService } from './mini-app/auth.js';
 import { MiniAppManagementService } from './mini-app/service.js';
 import { AiAvailabilityService } from './ai/availability.js';
+import { ExactAnswerService } from './knowledge/exact-answer-service.js';
+import { ContextualQueryRewriter } from './ai/query-rewriter.js';
 export function createServices(config, logger, prisma) {
     const database = prisma ?? createPrismaClient(config, logger);
     logger.attachDatabase?.(database);
@@ -35,12 +37,14 @@ export function createServices(config, logger, prisma) {
     const indexing = new IndexingService(database, openai, vectors, config, logger, notifier);
     const messenger = new BusinessMessenger(database, businessTelegram, config, logger);
     const aiAvailability = new AiAvailabilityService(database, config.business.defaultTimezone);
-    const conversations = new ConversationProcessor(database, retrieval, openai, handoffs, messenger, notifier, aiAvailability, config, logger);
+    const exactAnswers = new ExactAnswerService(database, openai, vectors, logger);
+    const queryRewriter = new ContextualQueryRewriter(config, undefined, logger);
+    const conversations = new ConversationProcessor(database, retrieval, openai, handoffs, messenger, notifier, aiAvailability, config, logger, queryRewriter, exactAnswers, openai);
     const knowledge = new KnowledgeService(database, config);
     const authorizer = new AdminAuthorizer(database);
     const health = new HealthService(database, vectors, businessTelegram, adminTelegram, config);
     const miniAppAuth = new MiniAppAuthService(database, config);
-    const miniAppManagement = new MiniAppManagementService(database, knowledge, handoffs, health, config, aiAvailability, notifier, systemLogRepo);
+    const miniAppManagement = new MiniAppManagementService(database, knowledge, handoffs, health, config, aiAvailability, notifier, systemLogRepo, exactAnswers);
     const businessIngestor = new BusinessUpdateIngestor(database, businessTelegram, config, logger);
     const adminHandler = new AdminBotHandler(database, adminTelegram, authorizer, config.telegram.miniAppUrl, logger);
     const worker = new WorkerRunner(indexing, conversations, handoffs, nanoGptCredit, notifier, config, logger, systemLogRepo);
@@ -68,6 +72,8 @@ export function createServices(config, logger, prisma) {
         adminHandler,
         worker,
         systemLogRepo,
+        exactAnswers,
+        queryRewriter,
     };
 }
 //# sourceMappingURL=app.js.map

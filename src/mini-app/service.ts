@@ -31,6 +31,7 @@ import {
 import type { AdminNotifier } from '../telegram-admin/notifier.js';
 import type { SystemLogCategory, SystemLogLevel } from '../observability/types.js';
 import type { SystemLogRepository } from '../observability/system-log-repository.js';
+import type { ExactAnswerService } from '../knowledge/exact-answer-service.js';
 
 const adminSelect = {
   id: true,
@@ -55,6 +56,7 @@ export class MiniAppManagementService {
     private readonly availability?: AiAvailabilityService,
     private readonly notifier?: AdminNotifier,
     private readonly systemLogRepo?: SystemLogRepository,
+    private readonly exactAnswers?: ExactAnswerService,
   ) {}
 
   businesses(context: MiniAppSessionContext) {
@@ -586,9 +588,12 @@ export class MiniAppManagementService {
   ) {
     requireRole(context, AdminRole.ADMIN);
     requireBusiness(context, businessAccountId);
-    const [published, drafts] = await Promise.all([
+    const [published, drafts, exactAnswers] = await Promise.all([
       this.knowledge.list(businessAccountId, 1, 100, options.query),
       this.knowledge.listDrafts(businessAccountId),
+      this.exactAnswers
+        ? this.exactAnswers.list(businessAccountId, options.query)
+        : Promise.resolve([]),
     ]);
     return {
       published: published.items,
@@ -598,6 +603,7 @@ export class MiniAppManagementService {
           draft.title.includes(options.query) ||
           draft.description.includes(options.query),
       ),
+      exactAnswers,
     };
   }
 
@@ -715,6 +721,87 @@ export class MiniAppManagementService {
     requireRole(context, AdminRole.ADMIN);
     requireBusiness(context, businessAccountId);
     return this.knowledge.publishDraft(businessAccountId, draftId, revision, context.admin.id);
+  }
+
+  async exactAnswerDetails(context: MiniAppSessionContext, businessAccountId: string, id: string) {
+    requireRole(context, AdminRole.ADMIN);
+    requireBusiness(context, businessAccountId);
+    if (!this.exactAnswers) throw new ResourceUnavailableError();
+    const item = await this.exactAnswers.get(id, businessAccountId);
+    if (!item) throw new ResourceUnavailableError();
+    return item;
+  }
+
+  async createExactAnswer(
+    context: MiniAppSessionContext,
+    businessAccountId: string,
+    input: {
+      name: string;
+      content: string;
+      questions: string[];
+      isActive?: boolean | undefined;
+    },
+  ) {
+    requireRole(context, AdminRole.ADMIN);
+    requireBusiness(context, businessAccountId);
+    if (!this.exactAnswers) throw new ResourceUnavailableError();
+    if (!input.name.trim()) throw new ValidationError('نام پاسخ الزامی است');
+    if (!input.content.trim()) throw new ValidationError('متن پاسخ الزامی است');
+    if (input.questions.length === 0) throw new ValidationError('حداقل یک سوال الزامی است');
+    return this.exactAnswers.create({
+      businessAccountId,
+      name: input.name,
+      content: input.content,
+      questions: input.questions,
+      adminId: context.admin.id,
+      isActive: input.isActive ?? true,
+    });
+  }
+
+  async updateExactAnswer(
+    context: MiniAppSessionContext,
+    businessAccountId: string,
+    id: string,
+    input: {
+      name?: string | undefined;
+      content?: string | undefined;
+      questions?: string[] | undefined;
+      isActive?: boolean | undefined;
+    },
+  ) {
+    requireRole(context, AdminRole.ADMIN);
+    requireBusiness(context, businessAccountId);
+    if (!this.exactAnswers) throw new ResourceUnavailableError();
+    return this.exactAnswers.update(id, businessAccountId, {
+      ...(input.name !== undefined ? { name: input.name } : {}),
+      ...(input.content !== undefined ? { content: input.content } : {}),
+      ...(input.questions !== undefined ? { questions: input.questions } : {}),
+      ...(input.isActive !== undefined ? { isActive: input.isActive } : {}),
+      adminId: context.admin.id,
+    });
+  }
+
+  async setExactAnswerActive(
+    context: MiniAppSessionContext,
+    businessAccountId: string,
+    id: string,
+    isActive: boolean,
+  ) {
+    requireRole(context, AdminRole.ADMIN);
+    requireBusiness(context, businessAccountId);
+    if (!this.exactAnswers) throw new ResourceUnavailableError();
+    return this.exactAnswers.update(id, businessAccountId, {
+      isActive,
+      adminId: context.admin.id,
+    });
+  }
+
+  async deleteExactAnswer(context: MiniAppSessionContext, businessAccountId: string, id: string) {
+    requireRole(context, AdminRole.ADMIN);
+    requireBusiness(context, businessAccountId);
+    if (!this.exactAnswers) throw new ResourceUnavailableError();
+    await this.exactAnswers.delete(id, businessAccountId);
+    return { ok: true };
   }
 
   async listConnections(context: MiniAppSessionContext, businessAccountId: string) {

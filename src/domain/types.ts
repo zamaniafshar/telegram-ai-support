@@ -54,3 +54,37 @@ export interface KnowledgeInput {
   description: string;
   isActive?: boolean;
 }
+
+export interface QueryRewriterInput {
+  text: string;
+  context: ConversationContextMessage[];
+}
+
+export interface QueryRewriterResult {
+  text: string;
+  wasRewritten: boolean;
+}
+
+export interface QueryRewriter {
+  rewriteIfEligible(input: QueryRewriterInput): Promise<QueryRewriterResult>;
+}
+
+export interface ExactAnswerMatchResult {
+  exactAnswerId: string;
+  exactQuestionId: string;
+  questionText: string;
+  content: string;
+  score: number;
+}
+
+export interface ExactAnswerMatcher {
+  match(input: {
+    vector: number[];
+    businessAccountId: string;
+    threshold: number;
+  }): Promise<ExactAnswerMatchResult | null>;
+}
+
+export type PipelineResult =
+  | { type: 'EXACT_COPY_PASTE'; content: string; match?: ExactAnswerMatchResult }
+  | { type: 'RAG_GENERATED'; decision: AiDecisionResult };

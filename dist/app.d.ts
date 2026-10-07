@@ -21,6 +21,8 @@ import { NanoGptBalanceClient, NanoGptCreditMonitor } from './ai/nanogpt-credit.
 import { MiniAppAuthService } from './mini-app/auth.js';
 import { MiniAppManagementService } from './mini-app/service.js';
 import { AiAvailabilityService } from './ai/availability.js';
+import { ExactAnswerService } from './knowledge/exact-answer-service.js';
+import { ContextualQueryRewriter } from './ai/query-rewriter.js';
 export declare function createServices(config: AppConfig, logger: Logger, prisma?: PrismaClient): {
     prisma: PrismaClient<import("@prisma/client").Prisma.PrismaClientOptions, never, import("@prisma/client/runtime/library").DefaultArgs>;
     businessTelegram: TelegramBotApiClient;
@@ -45,5 +47,7 @@ export declare function createServices(config: AppConfig, logger: Logger, prisma
     adminHandler: AdminBotHandler;
     worker: WorkerRunner;
     systemLogRepo: SystemLogRepository;
+    exactAnswers: ExactAnswerService;
+    queryRewriter: ContextualQueryRewriter;
 };
 export type Services = ReturnType<typeof createServices>;

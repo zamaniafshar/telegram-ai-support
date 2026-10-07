@@ -11,6 +11,7 @@ import { SettingsPage } from '../features/settings/AiSettingsPage';
 import { HandoffDetailPage, HandoffsPage, AiBacklogPage } from '../features/support/SupportPages';
 import {
   DraftEditorPage,
+  ExactAnswerDetailPage,
   KnowledgeDetailPage,
   KnowledgePage,
 } from '../features/knowledge/KnowledgePages';
@@ -99,6 +100,14 @@ export function App() {
                     }
                   />
                   <Route
+                    path="knowledge/new"
+                    element={
+                      <CapabilityRoute capability="knowledge:manage">
+                        <DraftEditorPage />
+                      </CapabilityRoute>
+                    }
+                  />
+                  <Route
                     path="knowledge/drafts/:id"
                     element={
                       <CapabilityRoute capability="knowledge:manage">
@@ -111,6 +120,14 @@ export function App() {
                     element={
                       <CapabilityRoute capability="knowledge:manage">
                         <KnowledgeDetailPage />
+                      </CapabilityRoute>
+                    }
+                  />
+                  <Route
+                    path="knowledge/exact-answers/:id"
+                    element={
+                      <CapabilityRoute capability="knowledge:manage">
+                        <ExactAnswerDetailPage />
                       </CapabilityRoute>
                     }
                   />

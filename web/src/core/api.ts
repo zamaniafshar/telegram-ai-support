@@ -18,10 +18,28 @@ export class ApiError extends Error {
   }
 }
 
-let csrfToken = '';
+let csrfToken = typeof window !== 'undefined' ? (sessionStorage.getItem('csrfToken') ?? '') : '';
 
 export function setCsrfToken(value: string): void {
   csrfToken = value;
+  if (typeof window !== 'undefined') {
+    try {
+      sessionStorage.setItem('csrfToken', value);
+    } catch {
+      // ignore storage errors
+    }
+  }
+}
+
+function safeUuid(): string {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID();
+  }
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+    const r = (Math.random() * 16) | 0;
+    const v = c === 'x' ? r : (r & 0x3) | 0x8;
+    return v.toString(16);
+  });
 }
 
 export async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
@@ -30,9 +48,11 @@ export async function request<T>(path: string, init: RequestInit = {}): Promise<
   const headers = new Headers(init.headers);
   headers.set('Accept', 'application/json');
   if (init.body) headers.set('Content-Type', 'application/json');
-  if (mutation && csrfToken) {
-    headers.set('X-CSRF-Token', csrfToken);
-    headers.set('Idempotency-Key', crypto.randomUUID());
+  if (mutation) {
+    headers.set('Idempotency-Key', safeUuid());
+    if (csrfToken) {
+      headers.set('X-CSRF-Token', csrfToken);
+    }
   }
   const response = await fetch(path, { ...init, headers, credentials: 'same-origin' });
   if (response.status === 204) return undefined as T;

@@ -66,7 +66,15 @@ const envSchema = z.object({
     .string()
     .regex(/^[a-zA-Z0-9_-]+$/)
     .default('telegram_support_knowledge'),
+  QDRANT_EXACT_QUESTIONS_COLLECTION: z
+    .string()
+    .regex(/^[a-zA-Z0-9_-]+$/)
+    .default('telegram_support_exact_questions'),
   QDRANT_TIMEOUT_MS: positiveInt(10_000),
+
+  COPY_PASTE_THRESHOLD: z.coerce.number().min(0).max(1).default(0.88),
+  REWRITER_TIMEOUT_MS: positiveInt(1_500),
+  REWRITER_MODEL: z.string().min(1).optional(),
 
   RETRIEVAL_MIN_SCORE: z.coerce.number().min(0).max(1).default(0.72),
   RETRIEVAL_LIMIT: z.coerce.number().int().min(1).max(50).default(8),
@@ -219,11 +227,13 @@ export function loadConfig(source: NodeJS.ProcessEnv = process.env) {
       url: env.QDRANT_URL,
       apiKey: env.QDRANT_API_KEY || undefined,
       collection: env.QDRANT_COLLECTION,
+      exactQuestionsCollection: env.QDRANT_EXACT_QUESTIONS_COLLECTION,
       timeoutMs: env.QDRANT_TIMEOUT_MS,
     },
     rag: {
       retrievalMinScore: env.RETRIEVAL_MIN_SCORE,
       retrievalLimit: env.RETRIEVAL_LIMIT,
+      copyPasteThreshold: env.COPY_PASTE_THRESHOLD,
       contextMessages: env.CONVERSATION_CONTEXT_MESSAGES,
       maxCustomerMessageLength: env.MAX_CUSTOMER_MESSAGE_LENGTH,
       maxKnowledgeTitleLength: env.MAX_KNOWLEDGE_TITLE_LENGTH,
@@ -231,6 +241,10 @@ export function loadConfig(source: NodeJS.ProcessEnv = process.env) {
       chunkMaxChars: env.CHUNK_MAX_CHARS,
       chunkOverlapChars: env.CHUNK_OVERLAP_CHARS,
       debounceMs: env.MESSAGE_DEBOUNCE_MS,
+    },
+    rewriter: {
+      timeoutMs: env.REWRITER_TIMEOUT_MS,
+      model: env.REWRITER_MODEL ?? env.OPENAI_CHAT_MODEL,
     },
     routing: {
       safeGreetingEnabled: env.SAFE_GREETING_ENABLED,

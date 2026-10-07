@@ -247,6 +247,70 @@ p {
   gap: 22px;
   align-items: start;
 }
+.filter-tabs {
+  display: flex;
+  gap: 8px;
+  margin-block: 4px 14px;
+  overflow-x: auto;
+  padding-bottom: 2px;
+}
+.filter-tab {
+  appearance: none;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--muted);
+  padding: 7px 15px;
+  border-radius: 999px;
+  font-size: 0.85rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  white-space: nowrap;
+}
+.filter-tab:hover {
+  border-color: #9abbd4;
+  color: inherit;
+}
+.filter-tab.active {
+  background: var(--primary);
+  border-color: var(--primary);
+  color: #fff;
+}
+.type-selector-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  margin-bottom: 18px;
+}
+.type-option-card {
+  border: 2px solid var(--border);
+  border-radius: 14px;
+  padding: 14px 16px;
+  cursor: pointer;
+  background: var(--surface);
+  transition: all 0.18s ease;
+  text-align: right;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.type-option-card:hover {
+  border-color: #9abbd4;
+}
+.type-option-card.selected {
+  border-color: var(--primary);
+  background: color-mix(in srgb, var(--primary) 8%, var(--surface));
+}
+.type-option-card strong {
+  font-size: 0.95rem;
+  color: inherit;
+}
+.type-option-card span {
+  font-size: 0.8rem;
+  color: var(--muted);
+  font-weight: normal;
+  line-height: 1.4;
+}
 .card,
 .form-card,
 .list-card {

@@ -38,6 +38,10 @@ const labels: Record<string, string> = {
   SAFE_GREETING: 'پاسخ خوشامدگویی',
   KNOWLEDGE_MISSING_OR_INACTIVE: 'دانش حذف یا غیرفعال شده است',
   VERSION_MISMATCH: 'نسخه دانش با MySQL هم‌خوان نیست',
+  EXACT_ANSWER: 'پاسخ مستقیم FAQ',
+  KNOWLEDGE: 'دانش RAG',
+  ACTIVE: 'فعال',
+  INACTIVE: 'غیرفعال',
 };
 
 export const outcomeLabels: Record<string, string> = {

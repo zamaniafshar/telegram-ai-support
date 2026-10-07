@@ -18,18 +18,23 @@ A concise, step-by-step guide to deploying, running, and updating **telegram-ai-
 Run these steps once when setting up the project on the server:
 
 ### Step 1: Clone or Upload Files
+
 ```bash
 git clone <your-repo-url> app
 cd app
 ```
 
 ### Step 2: Configure Environment Variables
+
 Copy and configure `.env`:
+
 ```bash
 cp .env.example .env
 nano .env   # or edit via cPanel File Manager
 ```
+
 > **Key Shared-Host Settings in `.env`:**
+>
 > - `NODE_ENV=production`
 > - `TELEGRAM_TRANSPORT=webhook`
 > - `PUBLIC_BASE_URL=https://yourdomain.com`
@@ -38,29 +43,37 @@ nano .env   # or edit via cPanel File Manager
 > - Make sure `MINI_APP_DEV_ADMIN_ID` is **commented out / deleted**!
 
 ### Step 3: Install Dependencies
+
 ```bash
 npm ci
 ```
 
 ### Step 4: Run Database Migrations
+
 ```bash
 npm run prisma:migrate
 ```
 
 ### Step 5: Initialize Qdrant Collection
+
 Creates and prepares the vector collection in Qdrant:
+
 ```bash
 npm run qdrant:init
 ```
 
 ### Step 6: Register Telegram Webhooks
+
 Registers your production HTTPS endpoint with Telegram:
+
 ```bash
 npm run telegram:set-webhooks
 ```
 
 ### Step 7: Build Application
+
 Compiles the TypeScript backend into `dist/` and builds the React Mini App into `web/dist/`:
+
 ```bash
 npm run build
 ```
@@ -68,6 +81,7 @@ npm run build
 ### Step 8: Start the Process
 
 #### Option A: Using PM2 (Recommended)
+
 ```bash
 pm2 start dist/main.js --name telegram-ai-support --max-memory-restart 300M
 pm2 save
@@ -75,6 +89,7 @@ pm2 startup
 ```
 
 #### Option B: Using cPanel "Setup Node.js App"
+
 - **Application root**: `app` (your project directory)
 - **Application startup file**: `dist/main.js`
 - **Application mode**: `Production`
@@ -104,12 +119,14 @@ pm2 restart telegram-ai-support
 ```
 
 ### ⚡ One-Liner Update Command
+
 You can run this all at once:
+
 ```bash
 git pull && npm ci && npm run prisma:migrate && npm run build && pm2 restart telegram-ai-support
 ```
 
-*(If using cPanel Node.js selector instead of PM2, click the **Restart** button in cPanel after running the build).*
+_(If using cPanel Node.js selector instead of PM2, click the **Restart** button in cPanel after running the build)._
 
 ---
 
@@ -118,16 +135,19 @@ git pull && npm ci && npm run prisma:migrate && npm run build && pm2 restart tel
 Verify your deployment is running healthy:
 
 1. **Check process status**:
+
    ```bash
    pm2 status
    pm2 logs telegram-ai-support --lines 50
    ```
 
 2. **Check HTTP Health endpoints**:
+
    ```bash
    curl -i http://127.0.0.1:3000/health/live
    curl -i http://127.0.0.1:3000/health/ready
    ```
+
    Both should return HTTP `200` with `{"ready":true}`.
 
 3. **Check Webhook URL**:

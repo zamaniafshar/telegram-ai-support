@@ -51,11 +51,13 @@ export declare function loadConfig(source?: NodeJS.ProcessEnv): {
         readonly url: string;
         readonly apiKey: string | undefined;
         readonly collection: string;
+        readonly exactQuestionsCollection: string;
         readonly timeoutMs: number;
     };
     readonly rag: {
         readonly retrievalMinScore: number;
         readonly retrievalLimit: number;
+        readonly copyPasteThreshold: number;
         readonly contextMessages: number;
         readonly maxCustomerMessageLength: number;
         readonly maxKnowledgeTitleLength: number;
@@ -63,6 +65,10 @@ export declare function loadConfig(source?: NodeJS.ProcessEnv): {
         readonly chunkMaxChars: number;
         readonly chunkOverlapChars: number;
         readonly debounceMs: number;
+    };
+    readonly rewriter: {
+        readonly timeoutMs: number;
+        readonly model: string;
     };
     readonly routing: {
         readonly safeGreetingEnabled: boolean;

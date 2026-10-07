@@ -159,6 +159,7 @@ model BusinessAccount {
   notifications              Notification[]
   aiSettings                 BusinessAiSettings?
   aiDecisionLogs             AiDecisionLog[]
+  exactAnswers               ExactAnswer[]
   systemLogs                 SystemLog[]
 
   @@index([isActive])
@@ -221,6 +222,8 @@ model Admin {
   sessions          AdminSession[]
   notifications     NotificationDelivery[]
   aiSettingsUpdates BusinessAiSettings[]
+  createdExactAnswers ExactAnswer[]        @relation("ExactAnswerCreatedBy")
+  updatedExactAnswers ExactAnswer[]        @relation("ExactAnswerUpdatedBy")
 }
 
 model AdminBusinessAccount {
@@ -491,6 +494,10 @@ model AiDecisionLog {
   totalTokens               Int?
   latencyMs                 Int
   errorCode                 String?         @db.VarChar(100)
+  wasRewritten              Boolean         @default(false)
+  rewrittenQuery            String?         @db.Text
+  matchedExactQuestionId    String?         @db.Char(36)
+  exactMatchScore           Float?
   createdAt                 DateTime        @default(now())
   completedAt               DateTime?
   expiresAt                 DateTime
@@ -621,3 +628,36 @@ model SystemLog {
   @@index([errorCode, createdAt])
   @@index([createdAt])
 }
+
+model ExactAnswer {
+  id                String          @id @db.Char(36)
+  businessAccountId String          @db.Char(36)
+  name              String          @db.VarChar(200)
+  content           String          @db.LongText
+  isActive          Boolean         @default(true)
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+  createdByAdminId  String?         @db.Char(36)
+  updatedByAdminId  String?         @db.Char(36)
+  businessAccount   BusinessAccount @relation(fields: [businessAccountId], references: [id], onDelete: Cascade)
+  createdByAdmin    Admin?          @relation("ExactAnswerCreatedBy", fields: [createdByAdminId], references: [id], onDelete: SetNull)
+  updatedByAdmin    Admin?          @relation("ExactAnswerUpdatedBy", fields: [updatedByAdminId], references: [id], onDelete: SetNull)
+  questions         ExactQuestion[]
+
+  @@index([businessAccountId, isActive])
+  @@index([updatedByAdminId])
+}
+
+model ExactQuestion {
+  id            String      @id @db.Char(36)
+  exactAnswerId String      @db.Char(36)
+  questionText  String      @db.VarChar(1000)
+  qdrantPointId String      @unique @db.VarChar(128)
+  isActive      Boolean     @default(true)
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+  exactAnswer   ExactAnswer @relation(fields: [exactAnswerId], references: [id], onDelete: Cascade)
+
+  @@index([exactAnswerId, isActive])
+}
+

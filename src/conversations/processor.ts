@@ -10,7 +10,13 @@ import {
 } from '@prisma/client';
 import type { Logger } from 'pino';
 import type { AppConfig } from '../config/env.js';
-import { PROMPT_VERSION, type GroundedAnswerer } from '../ai/openai.js';
+import { PROMPT_VERSION, type EmbeddingProvider, type GroundedAnswerer } from '../ai/openai.js';
+import type {
+  ExactAnswerMatcher,
+  ExactAnswerMatchResult,
+  PipelineResult,
+  QueryRewriter,
+} from '../domain/types.js';
 import type { RetrievalService } from '../retrieval/service.js';
 import type { HandoffService } from '../handoffs/service.js';
 import type { BusinessMessenger } from '../telegram-business/messenger.js';
@@ -49,6 +55,9 @@ export class ConversationProcessor {
     private readonly availability: AiAvailabilityService,
     private readonly config: AppConfig,
     private readonly logger: Logger,
+    private readonly rewriter?: QueryRewriter,
+    private readonly exactMatcher?: ExactAnswerMatcher,
+    private readonly embeddings?: EmbeddingProvider,
   ) {}
 
   async runBatch(workerId: string): Promise<number> {
@@ -448,19 +457,107 @@ export class ConversationProcessor {
         'initiating retrieval and calling AI grounded answerer',
       );
       const decision = await this.messenger.whileTyping(conversationId, async () => {
+        let searchQuery = customerText;
+        let wasRewritten = false;
+        let rewrittenQuery: string | null = null;
+
+        if (this.rewriter) {
+          const rewriteResult = await this.rewriter.rewriteIfEligible({
+            text: customerText,
+            context,
+          });
+          if (rewriteResult.wasRewritten) {
+            searchQuery = rewriteResult.text;
+            wasRewritten = true;
+            rewrittenQuery = rewriteResult.text;
+          }
+        }
+
+        await this.#updateTrace(firstJob.messageId, {
+          wasRewritten,
+          rewrittenQuery,
+        });
+
+        let exactMatch: ExactAnswerMatchResult | null = null;
+        if (this.exactMatcher && this.embeddings) {
+          const [searchVector] = await this.embeddings.embed([searchQuery]);
+          if (searchVector) {
+            exactMatch = await this.exactMatcher.match({
+              vector: searchVector,
+              businessAccountId: conversation.businessAccountId,
+              threshold: this.config.rag.copyPasteThreshold,
+            });
+          }
+        }
+
+        if (exactMatch) {
+          this.logger.info(
+            {
+              category: 'AI',
+              conversationId,
+              exactAnswerId: exactMatch.exactAnswerId,
+              score: exactMatch.score,
+              question: exactMatch.questionText,
+            },
+            'exact copy-paste answer matched, bypassing LLM synthesis',
+          );
+
+          await this.#updateTrace(firstJob.messageId, {
+            decision: 'COPY_PASTE_EXACT_MATCH',
+            answerable: true,
+            confidence: exactMatch.score,
+            reason: `EXACT_FAQ_MATCH: ${exactMatch.questionText}`,
+            answer: exactMatch.content,
+            matchedExactQuestionId: exactMatch.exactQuestionId,
+            exactMatchScore: exactMatch.score,
+            supportingChunkIds: [],
+            retrievalResults: [],
+            latencyMs: 0,
+            model: 'deterministic-exact-match',
+          });
+
+          const pipelineResult: PipelineResult = {
+            type: 'EXACT_COPY_PASTE',
+            content: exactMatch.content,
+            match: exactMatch,
+          };
+
+          return {
+            pipelineResult,
+            answerable: true,
+            answer: exactMatch.content,
+            confidence: exactMatch.score,
+            reason: `EXACT_FAQ_MATCH: ${exactMatch.questionText}`,
+            decision: 'COPY_PASTE_EXACT_MATCH' as const,
+          };
+        }
+
         const retrieval = await this.#retrieveWithTrace(
           conversation.businessAccountId,
-          customerText,
+          searchQuery,
         );
         await this.#recordRetrieval(firstJob.messageId, retrieval);
         const result = await this.answerer.decide({
-          customerText,
+          customerText: searchQuery,
           currentMessageBatch,
           retrieved: retrieval.validated,
           context,
         });
         await this.#recordDecision(firstJob, result, retrieval.validated);
-        return result;
+
+        const pipelineResult: PipelineResult = {
+          type: 'RAG_GENERATED',
+          decision: result,
+        };
+
+        return {
+          pipelineResult,
+          answerable: result.answerable,
+          answer: result.answer,
+          confidence: result.confidence,
+          reason: result.reason,
+          decision: result.decision,
+        };
       });
       this.logger.trace(
         {
@@ -879,6 +976,10 @@ export class ConversationProcessor {
           conversationContext: safeContext,
           promptVersion: PROMPT_VERSION,
           latencyMs: 0,
+          wasRewritten: false,
+          rewrittenQuery: null,
+          matchedExactQuestionId: null,
+          exactMatchScore: null,
           expiresAt,
         },
         update: {
@@ -886,6 +987,10 @@ export class ConversationProcessor {
           outcomeReason: null,
           completedAt: null,
           errorCode: null,
+          wasRewritten: false,
+          rewrittenQuery: null,
+          matchedExactQuestionId: null,
+          exactMatchScore: null,
           messageBatch: safeBatch,
           conversationContext: safeContext,
           expiresAt,

@@ -22,8 +22,11 @@ export class ConversationProcessor {
     availability;
     config;
     logger;
+    rewriter;
+    exactMatcher;
+    embeddings;
     lastRetentionRunAt = 0;
-    constructor(prisma, retrieval, answerer, handoffs, messenger, notifier, availability, config, logger) {
+    constructor(prisma, retrieval, answerer, handoffs, messenger, notifier, availability, config, logger, rewriter, exactMatcher, embeddings) {
         this.prisma = prisma;
         this.retrieval = retrieval;
         this.answerer = answerer;
@@ -33,6 +36,9 @@ export class ConversationProcessor {
         this.availability = availability;
         this.config = config;
         this.logger = logger;
+        this.rewriter = rewriter;
+        this.exactMatcher = exactMatcher;
+        this.embeddings = embeddings;
     }
     async runBatch(workerId) {
         await this.#pruneExpiredTraces();
@@ -345,16 +351,91 @@ export class ConversationProcessor {
                 customerTextPreview: customerText.slice(0, 100),
             }, 'initiating retrieval and calling AI grounded answerer');
             const decision = await this.messenger.whileTyping(conversationId, async () => {
-                const retrieval = await this.#retrieveWithTrace(conversation.businessAccountId, customerText);
+                let searchQuery = customerText;
+                let wasRewritten = false;
+                let rewrittenQuery = null;
+                if (this.rewriter) {
+                    const rewriteResult = await this.rewriter.rewriteIfEligible({
+                        text: customerText,
+                        context,
+                    });
+                    if (rewriteResult.wasRewritten) {
+                        searchQuery = rewriteResult.text;
+                        wasRewritten = true;
+                        rewrittenQuery = rewriteResult.text;
+                    }
+                }
+                await this.#updateTrace(firstJob.messageId, {
+                    wasRewritten,
+                    rewrittenQuery,
+                });
+                let exactMatch = null;
+                if (this.exactMatcher && this.embeddings) {
+                    const [searchVector] = await this.embeddings.embed([searchQuery]);
+                    if (searchVector) {
+                        exactMatch = await this.exactMatcher.match({
+                            vector: searchVector,
+                            businessAccountId: conversation.businessAccountId,
+                            threshold: this.config.rag.copyPasteThreshold,
+                        });
+                    }
+                }
+                if (exactMatch) {
+                    this.logger.info({
+                        category: 'AI',
+                        conversationId,
+                        exactAnswerId: exactMatch.exactAnswerId,
+                        score: exactMatch.score,
+                        question: exactMatch.questionText,
+                    }, 'exact copy-paste answer matched, bypassing LLM synthesis');
+                    await this.#updateTrace(firstJob.messageId, {
+                        decision: 'COPY_PASTE_EXACT_MATCH',
+                        answerable: true,
+                        confidence: exactMatch.score,
+                        reason: `EXACT_FAQ_MATCH: ${exactMatch.questionText}`,
+                        answer: exactMatch.content,
+                        matchedExactQuestionId: exactMatch.exactQuestionId,
+                        exactMatchScore: exactMatch.score,
+                        supportingChunkIds: [],
+                        retrievalResults: [],
+                        latencyMs: 0,
+                        model: 'deterministic-exact-match',
+                    });
+                    const pipelineResult = {
+                        type: 'EXACT_COPY_PASTE',
+                        content: exactMatch.content,
+                        match: exactMatch,
+                    };
+                    return {
+                        pipelineResult,
+                        answerable: true,
+                        answer: exactMatch.content,
+                        confidence: exactMatch.score,
+                        reason: `EXACT_FAQ_MATCH: ${exactMatch.questionText}`,
+                        decision: 'COPY_PASTE_EXACT_MATCH',
+                    };
+                }
+                const retrieval = await this.#retrieveWithTrace(conversation.businessAccountId, searchQuery);
                 await this.#recordRetrieval(firstJob.messageId, retrieval);
                 const result = await this.answerer.decide({
-                    customerText,
+                    customerText: searchQuery,
                     currentMessageBatch,
                     retrieved: retrieval.validated,
                     context,
                 });
                 await this.#recordDecision(firstJob, result, retrieval.validated);
-                return result;
+                const pipelineResult = {
+                    type: 'RAG_GENERATED',
+                    decision: result,
+                };
+                return {
+                    pipelineResult,
+                    answerable: result.answerable,
+                    answer: result.answer,
+                    confidence: result.confidence,
+                    reason: result.reason,
+                    decision: result.decision,
+                };
             });
             this.logger.trace({
                 category: 'AI',
@@ -651,6 +732,10 @@ export class ConversationProcessor {
                     conversationContext: safeContext,
                     promptVersion: PROMPT_VERSION,
                     latencyMs: 0,
+                    wasRewritten: false,
+                    rewrittenQuery: null,
+                    matchedExactQuestionId: null,
+                    exactMatchScore: null,
                     expiresAt,
                 },
                 update: {
@@ -658,6 +743,10 @@ export class ConversationProcessor {
                     outcomeReason: null,
                     completedAt: null,
                     errorCode: null,
+                    wasRewritten: false,
+                    rewrittenQuery: null,
+                    matchedExactQuestionId: null,
+                    exactMatchScore: null,
                     messageBatch: safeBatch,
                     conversationContext: safeContext,
                     expiresAt,

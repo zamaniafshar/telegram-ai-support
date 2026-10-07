@@ -108,6 +108,25 @@ export interface KnowledgeDraft {
   updatedAt: string;
 }
 
+export interface ExactQuestionItem {
+  id: string;
+  questionText: string;
+  isActive: boolean;
+  createdAt?: string;
+}
+
+export interface ExactAnswerItem {
+  id: string;
+  name: string;
+  content: string;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+  questions: ExactQuestionItem[];
+  createdByAdmin?: { id: string; displayName: string | null } | null;
+  updatedByAdmin?: { id: string; displayName: string | null } | null;
+}
+
 export interface AdminAccount {
   id: string;
   telegramUserId: string;

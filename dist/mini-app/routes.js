@@ -272,6 +272,52 @@ function registerMiniAppRoutes(app, auth, management) {
         const deletion = await management.deleteKnowledge(context, businessId, id);
         return data({ ok: true, ...deletion });
     });
+    app.get('/api/v1/businesses/:businessId/exact-answers/:id', async (request) => {
+        const context = await auth.requireSession(request);
+        const { businessId, id } = entityParams.parse(request.params);
+        return data(await management.exactAnswerDetails(context, businessId, id));
+    });
+    app.post('/api/v1/businesses/:businessId/exact-answers', async (request) => {
+        const context = await mutationContext(request, auth);
+        const { businessId } = businessParams.parse(request.params);
+        const body = z
+            .object({
+            name: z.string().trim().min(1).max(200),
+            content: z.string().trim().min(1).max(100_000),
+            questions: z.array(z.string().trim().min(1)).min(1),
+            isActive: z.boolean().optional(),
+        })
+            .parse(request.body);
+        return data(await management.createExactAnswer(context, businessId, body));
+    });
+    app.patch('/api/v1/businesses/:businessId/exact-answers/:id', async (request) => {
+        const context = await mutationContext(request, auth);
+        const { businessId, id } = entityParams.parse(request.params);
+        const body = z
+            .object({
+            name: z.string().trim().min(1).max(200).optional(),
+            content: z.string().trim().min(1).max(100_000).optional(),
+            questions: z.array(z.string().trim().min(1)).min(1).optional(),
+            isActive: z.boolean().optional(),
+        })
+            .refine((val) => val.name !== undefined ||
+            val.content !== undefined ||
+            val.questions !== undefined ||
+            val.isActive !== undefined)
+            .parse(request.body);
+        return data(await management.updateExactAnswer(context, businessId, id, body));
+    });
+    app.patch('/api/v1/businesses/:businessId/exact-answers/:id/active', async (request) => {
+        const context = await mutationContext(request, auth);
+        const { businessId, id } = entityParams.parse(request.params);
+        const body = z.object({ isActive: z.boolean() }).parse(request.body);
+        return data(await management.setExactAnswerActive(context, businessId, id, body.isActive));
+    });
+    app.delete('/api/v1/businesses/:businessId/exact-answers/:id', async (request) => {
+        const context = await mutationContext(request, auth);
+        const { businessId, id } = entityParams.parse(request.params);
+        return data(await management.deleteExactAnswer(context, businessId, id));
+    });
     app.get('/api/v1/businesses/:businessId/connections', async (request) => {
         const context = await auth.requireSession(request);
         const { businessId } = businessParams.parse(request.params);

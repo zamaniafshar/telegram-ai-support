@@ -7,7 +7,7 @@ import { z } from 'zod';
 import { request, jsonBody } from '../../core/api';
 import { formatDate } from '../../core/format';
 import { useTelegramMainButton, telegram } from '../../core/telegram';
-import type { KnowledgeDraft, KnowledgeItem } from '../../core/types';
+import type { ExactAnswerItem, KnowledgeDraft, KnowledgeItem } from '../../core/types';
 import {
   Badge,
   Button,
@@ -26,6 +26,7 @@ import { useConfirmation } from '../../app/ConfirmationProvider';
 interface KnowledgeList {
   published: KnowledgeItem[];
   drafts: KnowledgeDraft[];
+  exactAnswers?: ExactAnswerItem[];
 }
 interface KnowledgeDetail {
   item: KnowledgeItem;
@@ -58,8 +59,8 @@ function resizeDescriptionTextarea(element: HTMLTextAreaElement): void {
 export function KnowledgePage() {
   const { businessPath } = useSession();
   const navigate = useNavigate();
-  const toast = useToast();
   const [params, setParams] = useSearchParams();
+  const [typeFilter, setTypeFilter] = useState<'ALL' | 'KNOWLEDGE' | 'EXACT'>('ALL');
   const search = params.get('query') ?? '';
   const query = useQuery({
     queryKey: ['knowledge', businessPath(''), search],
@@ -68,81 +69,138 @@ export function KnowledgePage() {
         `${businessPath('/knowledge')}${search ? `?query=${encodeURIComponent(search)}` : ''}`,
       ),
   });
-  const create = useMutation({
-    mutationFn: () =>
-      request<KnowledgeDraft>(businessPath('/knowledge/drafts'), {
-        method: 'POST',
-        body: jsonBody({}),
-      }),
-    onSuccess: (draft) => navigate(`/knowledge/drafts/${draft.id}`),
-    onError: (error) => toast(error.message, 'error'),
-  });
   const result = query.data;
+  const publishedList = result?.published ?? [];
+  const draftsList = result?.drafts ?? [];
+  const exactList = result?.exactAnswers ?? [];
+  const totalCount = publishedList.length + draftsList.length + exactList.length;
+
+  const showRAG = typeFilter === 'ALL' || typeFilter === 'KNOWLEDGE';
+  const showExact = typeFilter === 'ALL' || typeFilter === 'EXACT';
+
+  const handleCreateNew = () => {
+    const typeParam = typeFilter === 'EXACT' ? '?type=exact' : '';
+    void navigate(`/knowledge/new${typeParam}`);
+  };
+
   return (
     <>
       <PageHeader
-        title="مدیریت دانش"
+        title="مدیریت دانش و پاسخ‌ها"
         subtitle={
           result
-            ? `${result.published.length.toLocaleString('fa-IR')} منتشرشده، ${result.drafts.length.toLocaleString('fa-IR')} پیش‌نویس`
-            : 'محتوای مورد استفاده برای پاسخ‌گویی'
+            ? `${publishedList.length.toLocaleString('fa-IR')} منتشرشده RAG، ${draftsList.length.toLocaleString('fa-IR')} پیش‌نویس، ${exactList.length.toLocaleString('fa-IR')} پاسخ کپی‌پیست FAQ`
+            : 'محتوای مورد استفاده برای پاسخ‌گویی هوشمند'
         }
         actions={
-          <Button variant="primary" onClick={() => create.mutate()} disabled={create.isPending}>
-            ایجاد پیش‌نویس
+          <Button variant="primary" onClick={handleCreateNew}>
+            تعریف محتوای جدید
           </Button>
         }
       />
       <SearchForm
         initialValue={search}
-        placeholder="جستجو در عنوان یا محتوا"
+        placeholder="جستجو در عنوان، سوالات یا متن پاسخ‌ها"
         onSearch={(value) => {
           if (value) params.set('query', value);
           else params.delete('query');
           setParams(params);
         }}
       />
+      <div className="filter-tabs" role="tablist">
+        <button
+          type="button"
+          className={`filter-tab ${typeFilter === 'ALL' ? 'active' : ''}`}
+          onClick={() => setTypeFilter('ALL')}
+        >
+          همه ({totalCount.toLocaleString('fa-IR')})
+        </button>
+        <button
+          type="button"
+          className={`filter-tab ${typeFilter === 'KNOWLEDGE' ? 'active' : ''}`}
+          onClick={() => setTypeFilter('KNOWLEDGE')}
+        >
+          پایگاه دانش RAG ({(publishedList.length + draftsList.length).toLocaleString('fa-IR')})
+        </button>
+        <button
+          type="button"
+          className={`filter-tab ${typeFilter === 'EXACT' ? 'active' : ''}`}
+          onClick={() => setTypeFilter('EXACT')}
+        >
+          پاسخ‌های کپی‌پیست FAQ ({exactList.length.toLocaleString('fa-IR')})
+        </button>
+      </div>
       <QueryState pending={query.isPending} error={query.error}>
         <div className="list">
-          {result && (result.drafts.length || result.published.length) ? (
+          {totalCount > 0 ? (
             <>
-              {result.drafts.map((draft) => (
-                <Link className="list-card" to={`/knowledge/drafts/${draft.id}`} key={draft.id}>
-                  <div className="list-main">
-                    <strong>{draft.title || 'پیش‌نویس بدون عنوان'}</strong>
-                    <span>برای تکمیل و انتشار باز کنید</span>
-                  </div>
-                  <div className="list-meta">
-                    <Badge status="DRAFT">پیش‌نویس</Badge>
-                    <time>{formatDate(draft.updatedAt, true)}</time>
-                  </div>
-                </Link>
-              ))}
-              {result.published.map((item) => (
-                <Link className="list-card" to={`/knowledge/${item.id}`} key={item.id}>
-                  <div className="list-main">
-                    <strong>{item.title}</strong>
-                    <span>
-                      {item.isActive
-                        ? 'در پاسخ‌گویی قابل استفاده است'
-                        : 'از پاسخ‌گویی خارج شده است'}
-                    </span>
-                  </div>
-                  <div className="list-meta">
-                    <Badge status={item.indexingStatus} />
-                    <time>{formatDate(item.updatedAt, true)}</time>
-                  </div>
-                </Link>
-              ))}
+              {showRAG &&
+                draftsList.map((draft) => (
+                  <Link className="list-card" to={`/knowledge/drafts/${draft.id}`} key={draft.id}>
+                    <div className="list-main">
+                      <strong>{draft.title || 'پیش‌نویس بدون عنوان'}</strong>
+                      <span>برای تکمیل و انتشار باز کنید</span>
+                    </div>
+                    <div className="list-meta">
+                      <Badge status="DRAFT">پیش‌نویس RAG</Badge>
+                      <time>{formatDate(draft.updatedAt, true)}</time>
+                    </div>
+                  </Link>
+                ))}
+              {showRAG &&
+                publishedList.map((item) => (
+                  <Link className="list-card" to={`/knowledge/${item.id}`} key={item.id}>
+                    <div className="list-main">
+                      <strong>{item.title}</strong>
+                      <span>
+                        {item.isActive
+                          ? 'در پاسخ‌گویی قابل استفاده است'
+                          : 'از پاسخ‌گویی خارج شده است'}
+                      </span>
+                    </div>
+                    <div className="list-meta">
+                      <Badge status="KNOWLEDGE">دانش RAG</Badge>
+                      <Badge status={item.indexingStatus} />
+                      <time>{formatDate(item.updatedAt, true)}</time>
+                    </div>
+                  </Link>
+                ))}
+              {showExact &&
+                exactList.map((exact) => (
+                  <Link
+                    className="list-card"
+                    to={`/knowledge/exact-answers/${exact.id}`}
+                    key={exact.id}
+                  >
+                    <div className="list-main">
+                      <strong>{exact.name}</strong>
+                      <span>
+                        {exact.questions.length > 0
+                          ? `${exact.questions.length.toLocaleString('fa-IR')} سوال: ${exact.questions
+                              .map((q) => q.questionText)
+                              .slice(0, 2)
+                              .join(' | ')}`
+                          : exact.content}
+                      </span>
+                    </div>
+                    <div className="list-meta">
+                      <Badge status="EXACT_ANSWER">پاسخ مستقیم FAQ</Badge>
+                      <Badge status={exact.isActive ? 'READY' : 'FAILED'}>
+                        {exact.isActive ? 'فعال' : 'غیرفعال'}
+                      </Badge>
+                      <time>{formatDate(exact.updatedAt, true)}</time>
+                    </div>
+                  </Link>
+                ))}
             </>
           ) : (
             <EmptyState
               icon="▤"
-              title="هنوز دانشی ثبت نشده است"
-              description="نخستین پیش‌نویس را ایجاد و پس از بازبینی منتشر کنید."
+              title="هنوز محتوایی ثبت نشده است"
+              description="نخستین محتوا را ایجاد کنید. می‌توانید بین پایگاه دانش RAG یا پاسخ کپی‌پیست FAQ انتخاب کنید."
               action={
-                <Button variant="primary" onClick={() => create.mutate()}>
-                  ایجاد پیش‌نویس
+                <Button variant="primary" onClick={handleCreateNew}>
+                  تعریف محتوای جدید
                 </Button>
               }
             />
@@ -341,27 +399,46 @@ type DraftForm = z.infer<typeof draftSchema>;
 export function DraftEditorPage() {
   const confirm = useConfirmation();
   const { id = '' } = useParams();
+  const [searchParams] = useSearchParams();
   const { businessPath } = useSession();
   const navigate = useNavigate();
   const toast = useToast();
+
+  const isNew = !id || id === 'new';
+  const initialType = searchParams.get('type') === 'exact' ? 'EXACT_ANSWER' : 'KNOWLEDGE';
+  const [contentType, setContentType] = useState<'KNOWLEDGE' | 'EXACT_ANSWER'>(initialType);
   const [draft, setDraft] = useState<KnowledgeDraft | null>(null);
   const [preview, setPreview] = useState<PreviewChunk[]>([]);
   const descriptionTextarea = useRef<HTMLTextAreaElement | null>(null);
+
+  // Exact Answer fields state
+  const [exactTitle, setExactTitle] = useState('');
+  const [exactQuestions, setExactQuestions] = useState('');
+  const [exactContent, setExactContent] = useState('');
+  const [exactActive, setExactActive] = useState(true);
+
   const query = useQuery({
     queryKey: ['knowledge-draft', businessPath(''), id],
     queryFn: () =>
       request<KnowledgeDraft>(businessPath(`/knowledge/drafts/${encodeURIComponent(id)}`)),
+    enabled: !isNew,
   });
+
+  const activeDraft = draft ?? query.data ?? null;
+
   const form = useForm<DraftForm>({
     resolver: zodResolver(draftSchema),
     defaultValues: { title: '', description: '' },
   });
+
   useEffect(() => {
     if (query.data) {
       setDraft(query.data);
       form.reset({ title: query.data.title, description: query.data.description });
+      setExactTitle((prev) => prev || query.data.title);
     }
   }, [form, query.data]);
+
   useEffect(() => {
     const resize = () => {
       if (descriptionTextarea.current) resizeDescriptionTextarea(descriptionTextarea.current);
@@ -375,6 +452,7 @@ export function DraftEditorPage() {
       window.visualViewport?.removeEventListener('resize', resize);
     };
   }, [query.data?.description]);
+
   const dirty = form.formState.isDirty;
   useEffect(() => {
     if (dirty) telegram?.enableClosingConfirmation?.();
@@ -388,40 +466,68 @@ export function DraftEditorPage() {
       telegram?.disableClosingConfirmation?.();
     };
   }, [dirty]);
+
   const save = useCallback(
     async (values?: DraftForm) => {
-      if (!draft) throw new Error('پیش‌نویس هنوز آماده نیست.');
       const fields = values ?? form.getValues();
+      let currentDraft = activeDraft;
+      let targetId = id;
+
+      if (isNew || !targetId || targetId === 'new') {
+        const created = await request<KnowledgeDraft>(businessPath('/knowledge/drafts'), {
+          method: 'POST',
+          body: jsonBody({}),
+        });
+        currentDraft = created;
+        targetId = created.id;
+      }
+
       const updated = await request<KnowledgeDraft>(
-        businessPath(`/knowledge/drafts/${encodeURIComponent(id)}`),
-        { method: 'PATCH', body: jsonBody({ revision: draft.revision, ...fields }) },
+        businessPath(`/knowledge/drafts/${encodeURIComponent(targetId)}`),
+        {
+          method: 'PATCH',
+          body: jsonBody({
+            revision: currentDraft?.revision ?? 1,
+            title: fields.title,
+            description: fields.description,
+          }),
+        },
       );
       setDraft(updated);
       form.reset(fields);
+      if (isNew) {
+        await navigate(`/knowledge/drafts/${updated.id}`, { replace: true });
+      }
       return updated;
     },
-    [businessPath, draft, form, id],
+    [activeDraft, businessPath, form, id, isNew, navigate],
   );
+
   const saveMutation = useMutation({
     mutationFn: (values: DraftForm) => save(values),
     onSuccess: () => toast('پیش‌نویس ذخیره شد.'),
     onError: (error) => toast(error.message, 'error'),
   });
+
   const previewMutation = useMutation({
     mutationFn: async () => {
-      if (dirty) await save();
+      const valid = await form.trigger();
+      if (!valid) throw new Error('لطفاً عنوان و توضیحات را برای پیش‌نمایش وارد کنید.');
+      const saved = await save();
       return request<PreviewChunk[]>(
-        businessPath(`/knowledge/drafts/${encodeURIComponent(id)}/preview`),
+        businessPath(`/knowledge/drafts/${encodeURIComponent(saved.id)}/preview`),
         { method: 'POST' },
       );
     },
     onSuccess: setPreview,
     onError: (error) => toast(error.message, 'error'),
   });
+
   const publish = useCallback(async () => {
     try {
-      const current = dirty ? await save() : draft;
-      if (!current) return;
+      const valid = await form.trigger();
+      if (!valid) return;
+      const saved = await save();
       const confirmed = await confirm({
         title: 'انتشار دانش',
         message: 'این دانش منتشر و برای پردازش در صف قرار گیرد؟',
@@ -429,92 +535,623 @@ export function DraftEditorPage() {
       });
       if (!confirmed) return;
       const item = await request<KnowledgeItem>(
-        businessPath(`/knowledge/drafts/${encodeURIComponent(id)}/publish`),
-        { method: 'POST', body: jsonBody({ revision: current.revision }) },
+        businessPath(`/knowledge/drafts/${encodeURIComponent(saved.id)}/publish`),
+        { method: 'POST', body: jsonBody({ revision: saved.revision }) },
       );
       toast('دانش منتشر و برای پردازش در صف قرار گرفت.');
       await navigate(`/knowledge/${item.id}`, { replace: true });
     } catch (error) {
       toast(error instanceof Error ? error.message : 'انتشار انجام نشد.', 'error');
     }
-  }, [businessPath, confirm, dirty, draft, id, navigate, save, toast]);
-  useTelegramMainButton('انتشار دانش', () => void publish(), Boolean(draft));
+  }, [businessPath, confirm, form, navigate, save, toast]);
+
+  const createExactMutation = useMutation({
+    mutationFn: (body: { name: string; content: string; questions: string[]; isActive: boolean }) =>
+      request<ExactAnswerItem>(businessPath('/exact-answers'), {
+        method: 'POST',
+        body: jsonBody(body),
+      }),
+    onSuccess: async (created) => {
+      toast('پاسخ کپی‌پیست FAQ با موفقیت ثبت شد.');
+      await navigate(`/knowledge/exact-answers/${created.id}`, { replace: true });
+    },
+    onError: (error) => toast(error.message, 'error'),
+  });
+
+  const handleSaveExact = () => {
+    const name = exactTitle.trim();
+    const content = exactContent.trim();
+    const questions = exactQuestions
+      .split('\n')
+      .map((q) => q.trim())
+      .filter((q) => q.length > 0);
+
+    if (!name) {
+      toast('عنوان پاسخ الزامی است.', 'error');
+      return;
+    }
+    if (questions.length === 0) {
+      toast('حداقل یک نمونه سوال الزامی است.', 'error');
+      return;
+    }
+    if (!content) {
+      toast('متن دقیق پاسخ الزامی است.', 'error');
+      return;
+    }
+
+    createExactMutation.mutate({
+      name,
+      content,
+      questions,
+      isActive: exactActive,
+    });
+  };
+
+  const isReady = isNew || Boolean(activeDraft);
+
+  useTelegramMainButton(
+    contentType === 'KNOWLEDGE' ? 'انتشار دانش' : 'ذخیره پاسخ کپی‌پیست',
+    () => {
+      if (contentType === 'KNOWLEDGE') {
+        void publish();
+      } else {
+        handleSaveExact();
+      }
+    },
+    isReady,
+  );
+
   const descriptionField = form.register('description');
   return (
-    <QueryState pending={query.isPending} error={query.error}>
-      {draft && (
+    <QueryState pending={!isNew && query.isPending} error={!isNew ? query.error : null}>
+      {isReady && (
         <>
           <PageHeader
-            title="ویرایش پیش‌نویس"
-            subtitle={draft.title || 'بدون عنوان'}
-            actions={<Badge status="DRAFT">پیش‌نویس</Badge>}
+            title={isNew ? 'تعریف محتوای جدید' : 'تعریف و ویرایش محتوا'}
+            subtitle={
+              contentType === 'KNOWLEDGE'
+                ? ((activeDraft?.title.trim() ? activeDraft.title : undefined) ??
+                  (form.watch('title').trim() ? form.watch('title') : undefined) ??
+                  'پیش‌نویس پایگاه دانش RAG')
+                : exactTitle.trim()
+                  ? exactTitle
+                  : 'پاسخ مستقیم و کپی‌پیست FAQ'
+            }
+            actions={
+              <Badge status={contentType === 'KNOWLEDGE' ? 'DRAFT' : 'EXACT_ANSWER'}>
+                {contentType === 'KNOWLEDGE' ? 'پیش‌نویس RAG' : 'پاسخ کپی‌پیست'}
+              </Badge>
+            }
           />
           <div className="split-grid">
-            <form
-              className="form-card"
-              onSubmit={form.handleSubmit((values) => saveMutation.mutate(values))}
-            >
+            <div className="form-card">
               <label className="field">
-                عنوان
-                <input
-                  {...form.register('title')}
-                  maxLength={200}
-                  placeholder="برای نمونه: شرایط بازگشت وجه"
-                />
-                {form.formState.errors.title && (
-                  <small className="field-error">{form.formState.errors.title.message}</small>
-                )}
-              </label>
-              <label className="field">
-                توضیحات کامل
-                <textarea
-                  {...descriptionField}
-                  ref={(element) => {
-                    descriptionField.ref(element);
-                    descriptionTextarea.current = element;
+                نوع محتوا
+                <div className="type-selector-grid" style={{ marginTop: '8px' }}>
+                  <button
+                    type="button"
+                    className={`type-option-card ${contentType === 'KNOWLEDGE' ? 'selected' : ''}`}
+                    onClick={() => {
+                      setContentType('KNOWLEDGE');
+                      if (!form.getValues('title') && exactTitle) {
+                        form.setValue('title', exactTitle);
+                      }
+                    }}
+                  >
+                    <strong>📘 پایگاه دانش (RAG)</strong>
+                    <span>استناد و تولید پاسخ هوشمند توسط هوش مصنوعی بر مبنای متن</span>
+                  </button>
+                  <button
+                    type="button"
+                    className={`type-option-card ${contentType === 'EXACT_ANSWER' ? 'selected' : ''}`}
+                    onClick={() => {
+                      setContentType('EXACT_ANSWER');
+                      if (!exactTitle && form.getValues('title')) {
+                        setExactTitle(form.getValues('title'));
+                      }
+                    }}
+                  >
+                    <strong>⚡ پاسخ مستقیم و کپی‌پیست (FAQ)</strong>
+                    <span>پاسخ قطعی و بدون تغییر در صورت تطابق با سوالات کاربر</span>
+                  </button>
+                </div>
+                <select
+                  value={contentType}
+                  onChange={(e) => {
+                    const next = e.target.value as 'KNOWLEDGE' | 'EXACT_ANSWER';
+                    setContentType(next);
+                    if (next === 'EXACT_ANSWER' && !exactTitle) {
+                      setExactTitle(form.getValues('title'));
+                    } else if (next === 'KNOWLEDGE' && !form.getValues('title')) {
+                      form.setValue('title', exactTitle);
+                    }
                   }}
-                  className="knowledge-description-textarea"
-                  onInput={(event) => resizeDescriptionTextarea(event.currentTarget)}
-                  maxLength={100000}
-                  placeholder="اطلاعات دقیق و قابل استناد را بنویسید"
-                />
-                {form.formState.errors.description && (
-                  <small className="field-error">{form.formState.errors.description.message}</small>
-                )}
-                <small>این متن منبع پاسخ‌گویی هوشمند خواهد بود.</small>
-              </label>
-              <div className="button-row">
-                <Button type="submit" disabled={saveMutation.isPending}>
-                  ذخیره پیش‌نویس
-                </Button>
-                <Button
-                  type="button"
-                  onClick={() => previewMutation.mutate()}
-                  disabled={previewMutation.isPending}
+                  style={{ display: 'none' }}
                 >
-                  پیش‌نمایش بخش‌ها
-                </Button>
-                <Button type="button" variant="primary" onClick={() => void publish()}>
-                  انتشار دانش
-                </Button>
-              </div>
-            </form>
+                  <option value="KNOWLEDGE">پایگاه دانش (RAG) — استناد و تولید پاسخ هوشمند</option>
+                  <option value="EXACT_ANSWER">
+                    پاسخ مستقیم و کپی‌پیست (FAQ) — بدون تغییر و بدون هزینه LLM
+                  </option>
+                </select>
+                <small>
+                  {contentType === 'KNOWLEDGE'
+                    ? 'پایگاه دانش برای متن‌های مفصل است که مدل هوش مصنوعی با استناد به آن‌ها پاسخ تولید می‌کند.'
+                    : 'پاسخ کپی‌پیست در صورت تطابق با سوالات کاربر، عیناً و مستقیم بدون دخالت هوش مصنوعی ارسال می‌شود.'}
+                </small>
+              </label>
+
+              {contentType === 'KNOWLEDGE' ? (
+                <form onSubmit={form.handleSubmit((values) => saveMutation.mutate(values))}>
+                  <label className="field">
+                    عنوان
+                    <input
+                      {...form.register('title')}
+                      maxLength={200}
+                      placeholder="برای نمونه: شرایط بازگشت وجه"
+                    />
+                    {form.formState.errors.title && (
+                      <small className="field-error">{form.formState.errors.title.message}</small>
+                    )}
+                  </label>
+                  <label className="field">
+                    توضیحات کامل
+                    <textarea
+                      {...descriptionField}
+                      ref={(element) => {
+                        descriptionField.ref(element);
+                        descriptionTextarea.current = element;
+                      }}
+                      className="knowledge-description-textarea"
+                      onInput={(event) => resizeDescriptionTextarea(event.currentTarget)}
+                      maxLength={100000}
+                      placeholder="اطلاعات دقیق و قابل استناد را بنویسید"
+                    />
+                    {form.formState.errors.description && (
+                      <small className="field-error">
+                        {form.formState.errors.description.message}
+                      </small>
+                    )}
+                    <small>این متن منبع پاسخ‌گویی هوشمند خواهد بود.</small>
+                  </label>
+                  <div className="button-row">
+                    <Button type="submit" disabled={saveMutation.isPending}>
+                      ذخیره پیش‌نویس
+                    </Button>
+                    <Button
+                      type="button"
+                      onClick={() => previewMutation.mutate()}
+                      disabled={previewMutation.isPending}
+                    >
+                      پیش‌نمایش بخش‌ها
+                    </Button>
+                    <Button type="button" variant="primary" onClick={() => void publish()}>
+                      انتشار دانش
+                    </Button>
+                  </div>
+                </form>
+              ) : (
+                <div>
+                  <label className="field">
+                    عنوان پاسخ
+                    <input
+                      value={exactTitle}
+                      onChange={(e) => setExactTitle(e.target.value)}
+                      maxLength={200}
+                      placeholder="برای نمونه: شماره شبا و کارت فروشگاه"
+                    />
+                    <small>این نام برای دسته‌بندی و شناسایی در پنل مدیریت است.</small>
+                  </label>
+                  <label className="field">
+                    نمونه سوالات مرتبط (هر خط یک سوال)
+                    <textarea
+                      value={exactQuestions}
+                      onChange={(e) => setExactQuestions(e.target.value)}
+                      style={{ minHeight: '140px' }}
+                      placeholder={`شماره حساب برای واریز چیه؟\nشماره کارت بدید\nبه چه حسابی واریز کنم؟`}
+                    />
+                    <small>
+                      هر خط یک نمونه سوال است که هوش مصنوعی در صورت تشابه، پاسخ زیر را دقیقاً ارسال
+                      خواهد کرد.
+                    </small>
+                  </label>
+                  <label className="field">
+                    متن دقیق پاسخ (کپی‌پیست)
+                    <textarea
+                      value={exactContent}
+                      onChange={(e) => setExactContent(e.target.value)}
+                      style={{ minHeight: '180px' }}
+                      placeholder="متن کامل و دقیق پاسخ را بنویسید (پشتیبانی از اموجی، لینک و خطوط جدید)..."
+                    />
+                    <small>این متن عیناً و بدون دخل و تصرف مدل برای مشتری ارسال خواهد شد.</small>
+                  </label>
+                  <label
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '8px',
+                      marginBottom: '18px',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={exactActive}
+                      onChange={(e) => setExactActive(e.target.checked)}
+                    />
+                    <span>فعال در پاسخ‌گویی خودکار</span>
+                  </label>
+                  <div className="button-row">
+                    <Button
+                      type="button"
+                      variant="primary"
+                      disabled={createExactMutation.isPending}
+                      onClick={handleSaveExact}
+                    >
+                      {createExactMutation.isPending && (
+                        <span className="button-spinner" aria-hidden="true" />
+                      )}
+                      ذخیره پاسخ کپی‌پیست
+                    </Button>
+                  </div>
+                </div>
+              )}
+            </div>
+
             <aside>
-              <Card title="پیش‌نمایش">
-                {preview.length ? (
-                  preview.map((chunk) => (
-                    <div className="chunk" dir="auto" key={chunk.index}>
-                      <strong>بخش {(chunk.index + 1).toLocaleString('fa-IR')}</strong>
-                      <br />
-                      {chunk.content}
+              {contentType === 'KNOWLEDGE' ? (
+                <Card title="پیش‌نمایش بخش‌های RAG">
+                  {preview.length ? (
+                    preview.map((chunk) => (
+                      <div className="chunk" dir="auto" key={chunk.index}>
+                        <strong>بخش {(chunk.index + 1).toLocaleString('fa-IR')}</strong>
+                        <br />
+                        {chunk.content}
+                      </div>
+                    ))
+                  ) : (
+                    <p className="muted">برای دیدن نحوه تقسیم محتوا، پیش‌نمایش را اجرا کنید.</p>
+                  )}
+                </Card>
+              ) : (
+                <Card title="پیش‌نمایش پاسخ کپی‌پیست">
+                  <div style={{ display: 'grid', gap: '14px' }}>
+                    <div>
+                      <strong style={{ fontSize: '0.85rem', color: 'var(--muted)' }}>
+                        سوالات تفکیک‌شده (
+                        {
+                          exactQuestions
+                            .split('\n')
+                            .map((q) => q.trim())
+                            .filter(Boolean).length
+                        }
+                        ):
+                      </strong>
+                      {exactQuestions
+                        .split('\n')
+                        .map((q) => q.trim())
+                        .filter(Boolean).length > 0 ? (
+                        <ul
+                          style={{
+                            margin: '6px 0 0',
+                            paddingInlineStart: '18px',
+                            fontSize: '0.88rem',
+                          }}
+                        >
+                          {exactQuestions
+                            .split('\n')
+                            .map((q) => q.trim())
+                            .filter(Boolean)
+                            .map((q, i) => (
+                              <li key={i}>{q}</li>
+                            ))}
+                        </ul>
+                      ) : (
+                        <p className="muted" style={{ margin: '4px 0 0' }}>
+                          هنوز نمونه سوالی وارد نشده است.
+                        </p>
+                      )}
                     </div>
-                  ))
-                ) : (
-                  <p className="muted">برای دیدن نحوه تقسیم محتوا، پیش‌نمایش را اجرا کنید.</p>
-                )}
-              </Card>
+                    <div>
+                      <strong style={{ fontSize: '0.85rem', color: 'var(--muted)' }}>
+                        متن خروجی Verbatim:
+                      </strong>
+                      {exactContent.trim() ? (
+                        <div className="chunk pre-wrap" dir="auto" style={{ marginTop: '6px' }}>
+                          {exactContent}
+                        </div>
+                      ) : (
+                        <p className="muted" style={{ margin: '4px 0 0' }}>
+                          متن پاسخ خالی است.
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                </Card>
+              )}
             </aside>
           </div>
+        </>
+      )}
+    </QueryState>
+  );
+}
+
+export function ExactAnswerDetailPage() {
+  const { id = '' } = useParams();
+  const { businessPath } = useSession();
+  const navigate = useNavigate();
+  const toast = useToast();
+  const client = useQueryClient();
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [editing, setEditing] = useState(false);
+
+  const [editName, setEditName] = useState('');
+  const [editQuestions, setEditQuestions] = useState('');
+  const [editContent, setEditContent] = useState('');
+  const [editActive, setEditActive] = useState(true);
+
+  const queryKey = ['exact-answer-detail', businessPath(''), id];
+  const query = useQuery({
+    queryKey,
+    queryFn: () =>
+      request<ExactAnswerItem>(businessPath(`/exact-answers/${encodeURIComponent(id)}`)),
+  });
+
+  const item = query.data;
+
+  useEffect(() => {
+    if (item) {
+      setEditName(item.name);
+      setEditQuestions(item.questions.map((q) => q.questionText).join('\n'));
+      setEditContent(item.content);
+      setEditActive(item.isActive);
+    }
+  }, [item]);
+
+  const toggleActiveMutation = useMutation({
+    mutationFn: (isActive: boolean) =>
+      request<ExactAnswerItem>(businessPath(`/exact-answers/${encodeURIComponent(id)}/active`), {
+        method: 'PATCH',
+        body: jsonBody({ isActive }),
+      }),
+    onSuccess: async (updated) => {
+      await client.invalidateQueries({ queryKey });
+      await client.invalidateQueries({ queryKey: ['knowledge'] });
+      toast(updated.isActive ? 'پاسخ فعال شد.' : 'پاسخ غیرفعال شد.');
+    },
+    onError: (error) => toast(error.message, 'error'),
+  });
+
+  const updateMutation = useMutation({
+    mutationFn: (body: { name: string; content: string; questions: string[]; isActive: boolean }) =>
+      request<ExactAnswerItem>(businessPath(`/exact-answers/${encodeURIComponent(id)}`), {
+        method: 'PATCH',
+        body: jsonBody(body),
+      }),
+    onSuccess: async () => {
+      setEditing(false);
+      await client.invalidateQueries({ queryKey });
+      await client.invalidateQueries({ queryKey: ['knowledge'] });
+      toast('تغییرات پاسخ با موفقیت ذخیره شد.');
+    },
+    onError: (error) => toast(error.message, 'error'),
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: () =>
+      request<{ ok: boolean }>(businessPath(`/exact-answers/${encodeURIComponent(id)}`), {
+        method: 'DELETE',
+      }),
+    onSuccess: async () => {
+      setDeleteOpen(false);
+      await client.invalidateQueries({ queryKey: ['knowledge'] });
+      toast('پاسخ کپی‌پیست و بردارهای آن با موفقیت حذف شدند.');
+      await navigate('/knowledge', { replace: true });
+    },
+    onError: (error) => toast(error.message, 'error'),
+  });
+
+  const handleSaveUpdate = () => {
+    const name = editName.trim();
+    const content = editContent.trim();
+    const questions = editQuestions
+      .split('\n')
+      .map((q) => q.trim())
+      .filter((q) => q.length > 0);
+
+    if (!name) {
+      toast('عنوان پاسخ الزامی است.', 'error');
+      return;
+    }
+    if (questions.length === 0) {
+      toast('حداقل یک نمونه سوال الزامی است.', 'error');
+      return;
+    }
+    if (!content) {
+      toast('متن دقیق پاسخ الزامی است.', 'error');
+      return;
+    }
+
+    updateMutation.mutate({
+      name,
+      content,
+      questions,
+      isActive: editActive,
+    });
+  };
+
+  return (
+    <QueryState pending={query.isPending} error={query.error}>
+      {item && (
+        <>
+          <PageHeader
+            title="جزئیات پاسخ مستقیم FAQ"
+            subtitle={item.name}
+            actions={
+              <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                <Badge status="EXACT_ANSWER">پاسخ مستقیم FAQ</Badge>
+                <Badge status={item.isActive ? 'READY' : 'FAILED'}>
+                  {item.isActive ? 'فعال' : 'غیرفعال'}
+                </Badge>
+              </div>
+            }
+          />
+
+          {editing ? (
+            <div className="split-grid">
+              <div className="form-card">
+                <h3>ویرایش پاسخ کپی‌پیست</h3>
+                <label className="field">
+                  عنوان پاسخ
+                  <input
+                    value={editName}
+                    onChange={(e) => setEditName(e.target.value)}
+                    maxLength={200}
+                  />
+                  <small>این نام برای دسته‌بندی و شناسایی در پنل مدیریت است.</small>
+                </label>
+                <label className="field">
+                  نمونه سوالات مرتبط (هر خط یک سوال)
+                  <textarea
+                    value={editQuestions}
+                    onChange={(e) => setEditQuestions(e.target.value)}
+                    style={{ minHeight: '140px' }}
+                  />
+                  <small>هر خط یک سوال است که در Qdrant بردارسازی خواهد شد.</small>
+                </label>
+                <label className="field">
+                  متن دقیق پاسخ (کپی‌پیست)
+                  <textarea
+                    value={editContent}
+                    onChange={(e) => setEditContent(e.target.value)}
+                    style={{ minHeight: '180px' }}
+                  />
+                  <small>این متن عیناً و مستقیم برای مشتری ارسال می‌شود.</small>
+                </label>
+                <label
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '8px',
+                    marginBottom: '18px',
+                    cursor: 'pointer',
+                  }}
+                >
+                  <input
+                    type="checkbox"
+                    checked={editActive}
+                    onChange={(e) => setEditActive(e.target.checked)}
+                  />
+                  <span>فعال در پاسخ‌گویی خودکار</span>
+                </label>
+                <div className="button-row">
+                  <Button
+                    type="button"
+                    variant="primary"
+                    disabled={updateMutation.isPending}
+                    onClick={handleSaveUpdate}
+                  >
+                    {updateMutation.isPending && (
+                      <span className="button-spinner" aria-hidden="true" />
+                    )}
+                    ذخیره تغییرات
+                  </Button>
+                  <Button
+                    type="button"
+                    onClick={() => {
+                      setEditing(false);
+                      setEditName(item.name);
+                      setEditQuestions(item.questions.map((q) => q.questionText).join('\n'));
+                      setEditContent(item.content);
+                      setEditActive(item.isActive);
+                    }}
+                  >
+                    انصراف
+                  </Button>
+                </div>
+              </div>
+              <aside>
+                <Card title="راهنما">
+                  <p className="muted" style={{ lineHeight: 1.8 }}>
+                    پس از ذخیره تغییرات، سوالات جدید به صورت خودکار در دیتابیس برداری Qdrant
+                    بروزرسانی خواهند شد. در صورتی که مشتری سوالی مشابه بپرسد، متن دقیق این پاسخ بدون
+                    استفاده از توکن‌های مدل زبانی ارسال می‌شود.
+                  </p>
+                </Card>
+              </aside>
+            </div>
+          ) : (
+            <div className="split-grid">
+              <section className="grid" style={{ display: 'grid', gap: '16px' }}>
+                <Card title="متن دقیق پاسخ (کپی‌پیست)">
+                  <p className="pre-wrap" dir="auto">
+                    {item.content}
+                  </p>
+                </Card>
+                <Card
+                  title={`نمونه سوالات مرتبط (${item.questions.length.toLocaleString('fa-IR')} سوال)`}
+                >
+                  {item.questions.length ? (
+                    item.questions.map((q, idx) => (
+                      <div className="chunk" dir="auto" key={q.id}>
+                        <strong>سوال {(idx + 1).toLocaleString('fa-IR')}</strong>
+                        <br />
+                        {q.questionText}
+                      </div>
+                    ))
+                  ) : (
+                    <p className="muted">سوالی ثبت نشده است.</p>
+                  )}
+                </Card>
+                <div className="button-row">
+                  <Button
+                    onClick={() => toggleActiveMutation.mutate(!item.isActive)}
+                    disabled={toggleActiveMutation.isPending}
+                  >
+                    {item.isActive ? 'غیرفعال‌سازی در پاسخ‌گویی' : 'فعال‌سازی در پاسخ‌گویی'}
+                  </Button>
+                  <Button onClick={() => setEditing(true)}>ویرایش پاسخ</Button>
+                  <Button variant="danger" onClick={() => setDeleteOpen(true)}>
+                    حذف پاسخ
+                  </Button>
+                </div>
+              </section>
+              <aside>
+                <Card title="اطلاعات">
+                  <div style={{ display: 'grid', gap: '10px' }}>
+                    <KeyValue label="وضعیت">{item.isActive ? 'فعال' : 'غیرفعال'}</KeyValue>
+                    <KeyValue label="تعداد سوالات بردارشده">
+                      {item.questions.length.toLocaleString('fa-IR')}
+                    </KeyValue>
+                    <KeyValue label="تاریخ ثبت">{formatDate(item.createdAt)}</KeyValue>
+                    <KeyValue label="آخرین بروزرسانی">{formatDate(item.updatedAt, true)}</KeyValue>
+                  </div>
+                </Card>
+              </aside>
+            </div>
+          )}
+
+          {deleteOpen && (
+            <Dialog
+              title="حذف پاسخ مستقیم FAQ"
+              description="آیا از حذف این پاسخ و کلیه سوالات و بردارهای مربوط به آن اطمینان دارید؟"
+              onClose={() => setDeleteOpen(false)}
+            >
+              <div className="button-row" style={{ marginTop: '16px' }}>
+                <Button onClick={() => setDeleteOpen(false)}>انصراف</Button>
+                <Button
+                  variant="danger"
+                  onClick={() => deleteMutation.mutate()}
+                  disabled={deleteMutation.isPending}
+                >
+                  {deleteMutation.isPending && (
+                    <span className="button-spinner" aria-hidden="true" />
+                  )}
+                  {deleteMutation.isPending ? 'در حال حذف…' : 'تأیید حذف'}
+                </Button>
+              </div>
+            </Dialog>
+          )}
         </>
       )}
     </QueryState>

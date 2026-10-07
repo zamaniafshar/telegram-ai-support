@@ -23,6 +23,8 @@ import { NanoGptBalanceClient, NanoGptCreditMonitor } from './ai/nanogpt-credit.
 import { MiniAppAuthService } from './mini-app/auth.js';
 import { MiniAppManagementService } from './mini-app/service.js';
 import { AiAvailabilityService } from './ai/availability.js';
+import { ExactAnswerService } from './knowledge/exact-answer-service.js';
+import { ContextualQueryRewriter } from './ai/query-rewriter.js';
 
 export function createServices(config: AppConfig, logger: Logger, prisma?: PrismaClient) {
   const database = prisma ?? createPrismaClient(config, logger);
@@ -50,6 +52,8 @@ export function createServices(config: AppConfig, logger: Logger, prisma?: Prism
   const indexing = new IndexingService(database, openai, vectors, config, logger, notifier);
   const messenger = new BusinessMessenger(database, businessTelegram, config, logger);
   const aiAvailability = new AiAvailabilityService(database, config.business.defaultTimezone);
+  const exactAnswers = new ExactAnswerService(database, openai, vectors, logger);
+  const queryRewriter = new ContextualQueryRewriter(config, undefined, logger);
   const conversations = new ConversationProcessor(
     database,
     retrieval,
@@ -60,6 +64,9 @@ export function createServices(config: AppConfig, logger: Logger, prisma?: Prism
     aiAvailability,
     config,
     logger,
+    queryRewriter,
+    exactAnswers,
+    openai,
   );
   const knowledge = new KnowledgeService(database, config);
   const authorizer = new AdminAuthorizer(database);
@@ -74,6 +81,7 @@ export function createServices(config: AppConfig, logger: Logger, prisma?: Prism
     aiAvailability,
     notifier,
     systemLogRepo,
+    exactAnswers,
   );
   const businessIngestor = new BusinessUpdateIngestor(database, businessTelegram, config, logger);
   const adminHandler = new AdminBotHandler(
@@ -117,6 +125,8 @@ export function createServices(config: AppConfig, logger: Logger, prisma?: Prism
     adminHandler,
     worker,
     systemLogRepo,
+    exactAnswers,
+    queryRewriter,
   };
 }
 

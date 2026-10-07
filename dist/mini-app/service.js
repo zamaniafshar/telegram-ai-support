@@ -24,7 +24,8 @@ export class MiniAppManagementService {
     availability;
     notifier;
     systemLogRepo;
-    constructor(prisma, knowledge, handoffs, health, config, availability, notifier, systemLogRepo) {
+    exactAnswers;
+    constructor(prisma, knowledge, handoffs, health, config, availability, notifier, systemLogRepo, exactAnswers) {
         this.prisma = prisma;
         this.knowledge = knowledge;
         this.handoffs = handoffs;
@@ -33,6 +34,7 @@ export class MiniAppManagementService {
         this.availability = availability;
         this.notifier = notifier;
         this.systemLogRepo = systemLogRepo;
+        this.exactAnswers = exactAnswers;
     }
     businesses(context) {
         return context.businessAccess
@@ -493,15 +495,19 @@ export class MiniAppManagementService {
     async listKnowledge(context, businessAccountId, options) {
         requireRole(context, AdminRole.ADMIN);
         requireBusiness(context, businessAccountId);
-        const [published, drafts] = await Promise.all([
+        const [published, drafts, exactAnswers] = await Promise.all([
             this.knowledge.list(businessAccountId, 1, 100, options.query),
             this.knowledge.listDrafts(businessAccountId),
+            this.exactAnswers
+                ? this.exactAnswers.list(businessAccountId, options.query)
+                : Promise.resolve([]),
         ]);
         return {
             published: published.items,
             drafts: drafts.filter((draft) => !options.query ||
                 draft.title.includes(options.query) ||
                 draft.description.includes(options.query)),
+            exactAnswers,
         };
     }
     async knowledgeDetails(context, businessAccountId, knowledgeId) {
@@ -577,6 +583,67 @@ export class MiniAppManagementService {
         requireRole(context, AdminRole.ADMIN);
         requireBusiness(context, businessAccountId);
         return this.knowledge.publishDraft(businessAccountId, draftId, revision, context.admin.id);
+    }
+    async exactAnswerDetails(context, businessAccountId, id) {
+        requireRole(context, AdminRole.ADMIN);
+        requireBusiness(context, businessAccountId);
+        if (!this.exactAnswers)
+            throw new ResourceUnavailableError();
+        const item = await this.exactAnswers.get(id, businessAccountId);
+        if (!item)
+            throw new ResourceUnavailableError();
+        return item;
+    }
+    async createExactAnswer(context, businessAccountId, input) {
+        requireRole(context, AdminRole.ADMIN);
+        requireBusiness(context, businessAccountId);
+        if (!this.exactAnswers)
+            throw new ResourceUnavailableError();
+        if (!input.name.trim())
+            throw new ValidationError('نام پاسخ الزامی است');
+        if (!input.content.trim())
+            throw new ValidationError('متن پاسخ الزامی است');
+        if (input.questions.length === 0)
+            throw new ValidationError('حداقل یک سوال الزامی است');
+        return this.exactAnswers.create({
+            businessAccountId,
+            name: input.name,
+            content: input.content,
+            questions: input.questions,
+            adminId: context.admin.id,
+            isActive: input.isActive ?? true,
+        });
+    }
+    async updateExactAnswer(context, businessAccountId, id, input) {
+        requireRole(context, AdminRole.ADMIN);
+        requireBusiness(context, businessAccountId);
+        if (!this.exactAnswers)
+            throw new ResourceUnavailableError();
+        return this.exactAnswers.update(id, businessAccountId, {
+            ...(input.name !== undefined ? { name: input.name } : {}),
+            ...(input.content !== undefined ? { content: input.content } : {}),
+            ...(input.questions !== undefined ? { questions: input.questions } : {}),
+            ...(input.isActive !== undefined ? { isActive: input.isActive } : {}),
+            adminId: context.admin.id,
+        });
+    }
+    async setExactAnswerActive(context, businessAccountId, id, isActive) {
+        requireRole(context, AdminRole.ADMIN);
+        requireBusiness(context, businessAccountId);
+        if (!this.exactAnswers)
+            throw new ResourceUnavailableError();
+        return this.exactAnswers.update(id, businessAccountId, {
+            isActive,
+            adminId: context.admin.id,
+        });
+    }
+    async deleteExactAnswer(context, businessAccountId, id) {
+        requireRole(context, AdminRole.ADMIN);
+        requireBusiness(context, businessAccountId);
+        if (!this.exactAnswers)
+            throw new ResourceUnavailableError();
+        await this.exactAnswers.delete(id, businessAccountId);
+        return { ok: true };
     }
     async listConnections(context, businessAccountId) {
         requireBusiness(context, businessAccountId);

@@ -16,6 +16,23 @@ export interface VectorPoint {
         checksum: string;
     };
 }
+export interface ExactVectorPoint {
+    id: string;
+    vector: number[];
+    payload: {
+        businessAccountId: string;
+        exactAnswerId: string;
+        exactQuestionId: string;
+        questionText: string;
+        isActive: boolean;
+    };
+}
+export interface ExactQuestionMatch {
+    exactAnswerId: string;
+    exactQuestionId: string;
+    questionText: string;
+    score: number;
+}
 export interface VectorStore {
     ensureCollection(dimensions: number): Promise<void>;
     recreateCollection(dimensions: number): Promise<void>;
@@ -29,6 +46,14 @@ export interface VectorStore {
         minScore: number;
         limit: number;
     }): Promise<RetrievalResult[]>;
+    upsertExactQuestions(points: ExactVectorPoint[]): Promise<void>;
+    removeExactQuestions(pointIds: string[]): Promise<void>;
+    searchExactQuestions(input: {
+        vector: number[];
+        businessAccountId: string;
+        threshold: number;
+        limit?: number;
+    }): Promise<ExactQuestionMatch[]>;
 }
 export declare class QdrantVectorStore implements VectorStore {
     private readonly config;
@@ -46,4 +71,12 @@ export declare class QdrantVectorStore implements VectorStore {
         minScore: number;
         limit: number;
     }): Promise<RetrievalResult[]>;
+    upsertExactQuestions(points: ExactVectorPoint[]): Promise<void>;
+    removeExactQuestions(pointIds: string[]): Promise<void>;
+    searchExactQuestions(input: {
+        vector: number[];
+        businessAccountId: string;
+        threshold: number;
+        limit?: number;
+    }): Promise<ExactQuestionMatch[]>;
 }

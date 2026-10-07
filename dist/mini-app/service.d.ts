@@ -7,6 +7,7 @@ import type { MiniAppSessionContext } from './auth.js';
 import { type AiAvailabilityService, type WeeklySchedule, type QueuePolicy } from '../ai/availability.js';
 import type { AdminNotifier } from '../telegram-admin/notifier.js';
 import type { SystemLogRepository } from '../observability/system-log-repository.js';
+import type { ExactAnswerService } from '../knowledge/exact-answer-service.js';
 export declare class MiniAppManagementService {
     #private;
     private readonly prisma;
@@ -17,7 +18,8 @@ export declare class MiniAppManagementService {
     private readonly availability?;
     private readonly notifier?;
     private readonly systemLogRepo?;
-    constructor(prisma: PrismaClient, knowledge: KnowledgeService, handoffs: HandoffService, health: HealthService, config: AppConfig, availability?: AiAvailabilityService | undefined, notifier?: AdminNotifier | undefined, systemLogRepo?: SystemLogRepository | undefined);
+    private readonly exactAnswers?;
+    constructor(prisma: PrismaClient, knowledge: KnowledgeService, handoffs: HandoffService, health: HealthService, config: AppConfig, availability?: AiAvailabilityService | undefined, notifier?: AdminNotifier | undefined, systemLogRepo?: SystemLogRepository | undefined, exactAnswers?: ExactAnswerService | undefined);
     businesses(context: MiniAppSessionContext): {
         id: string;
         name: string;
@@ -338,6 +340,23 @@ export declare class MiniAppManagementService {
             knowledgeItemId: string | null;
             revision: number;
         }[];
+        exactAnswers: ({
+            questions: {
+                id: string;
+                isActive: boolean;
+                questionText: string;
+            }[];
+        } & {
+            businessAccountId: string;
+            name: string;
+            id: string;
+            isActive: boolean;
+            createdAt: Date;
+            updatedAt: Date;
+            createdByAdminId: string | null;
+            updatedByAdminId: string | null;
+            content: string;
+        })[];
     }>;
     knowledgeDetails(context: MiniAppSessionContext, businessAccountId: string, knowledgeId: string): Promise<{
         item: {
@@ -360,9 +379,9 @@ export declare class MiniAppManagementService {
         chunks: {
             id: string;
             isActive: boolean;
+            content: string;
             chunkIndex: number;
             knowledgeVersion: number;
-            content: string;
         }[];
         jobs: {
             id: string;
@@ -443,6 +462,108 @@ export declare class MiniAppManagementService {
         updatedByAdminId: string | null;
         indexingLeaseOwner: string | null;
         indexingLeaseExpiresAt: Date | null;
+    }>;
+    exactAnswerDetails(context: MiniAppSessionContext, businessAccountId: string, id: string): Promise<{
+        createdByAdmin: {
+            id: string;
+            displayName: string | null;
+        } | null;
+        updatedByAdmin: {
+            id: string;
+            displayName: string | null;
+        } | null;
+        questions: {
+            id: string;
+            isActive: boolean;
+            createdAt: Date;
+            questionText: string;
+        }[];
+    } & {
+        businessAccountId: string;
+        name: string;
+        id: string;
+        isActive: boolean;
+        createdAt: Date;
+        updatedAt: Date;
+        createdByAdminId: string | null;
+        updatedByAdminId: string | null;
+        content: string;
+    }>;
+    createExactAnswer(context: MiniAppSessionContext, businessAccountId: string, input: {
+        name: string;
+        content: string;
+        questions: string[];
+        isActive?: boolean | undefined;
+    }): Promise<{
+        questions: {
+            id: string;
+            isActive: boolean;
+            createdAt: Date;
+            updatedAt: Date;
+            exactAnswerId: string;
+            questionText: string;
+            qdrantPointId: string;
+        }[];
+    } & {
+        businessAccountId: string;
+        name: string;
+        id: string;
+        isActive: boolean;
+        createdAt: Date;
+        updatedAt: Date;
+        createdByAdminId: string | null;
+        updatedByAdminId: string | null;
+        content: string;
+    }>;
+    updateExactAnswer(context: MiniAppSessionContext, businessAccountId: string, id: string, input: {
+        name?: string | undefined;
+        content?: string | undefined;
+        questions?: string[] | undefined;
+        isActive?: boolean | undefined;
+    }): Promise<{
+        questions: {
+            id: string;
+            isActive: boolean;
+            createdAt: Date;
+            updatedAt: Date;
+            exactAnswerId: string;
+            questionText: string;
+            qdrantPointId: string;
+        }[];
+    } & {
+        businessAccountId: string;
+        name: string;
+        id: string;
+        isActive: boolean;
+        createdAt: Date;
+        updatedAt: Date;
+        createdByAdminId: string | null;
+        updatedByAdminId: string | null;
+        content: string;
+    }>;
+    setExactAnswerActive(context: MiniAppSessionContext, businessAccountId: string, id: string, isActive: boolean): Promise<{
+        questions: {
+            id: string;
+            isActive: boolean;
+            createdAt: Date;
+            updatedAt: Date;
+            exactAnswerId: string;
+            questionText: string;
+            qdrantPointId: string;
+        }[];
+    } & {
+        businessAccountId: string;
+        name: string;
+        id: string;
+        isActive: boolean;
+        createdAt: Date;
+        updatedAt: Date;
+        createdByAdminId: string | null;
+        updatedByAdminId: string | null;
+        content: string;
+    }>;
+    deleteExactAnswer(context: MiniAppSessionContext, businessAccountId: string, id: string): Promise<{
+        ok: boolean;
     }>;
     listConnections(context: MiniAppSessionContext, businessAccountId: string): Promise<{
         id: string | undefined;

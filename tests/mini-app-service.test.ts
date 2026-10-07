@@ -210,4 +210,112 @@ describe('Mini App management service', () => {
     });
     expect(diag.logs).toEqual(expect.objectContaining({ byLevel: { ERROR: 1 } }));
   });
+
+  it('lists exact answers alongside published and draft knowledge items', async () => {
+    const knowledge = {
+      list: vi.fn().mockResolvedValue({
+        items: [{ id: 'k-1', title: 'شرایط گارانتی', description: 'متن گارانتی' }],
+      }),
+      listDrafts: vi
+        .fn()
+        .mockResolvedValue([{ id: 'd-1', title: 'پیش‌نویس گارانتی', description: 'متن پیش‌نویس' }]),
+    };
+    const exactAnswers = {
+      list: vi.fn().mockResolvedValue([
+        {
+          id: 'exact-1',
+          name: 'شماره کارت',
+          content: '۶۰۳۷۹۹...',
+          isActive: true,
+          questions: [{ id: 'q-1', questionText: 'شماره کارت بدید', isActive: true }],
+        },
+      ]),
+    };
+    const service = new MiniAppManagementService(
+      {} as never,
+      knowledge as never,
+      {} as never,
+      {} as never,
+      testConfig(),
+      undefined,
+      undefined,
+      undefined,
+      exactAnswers as never,
+    );
+    const context = {
+      admin: { id: 'admin-1', role: AdminRole.ADMIN },
+      businessAccess: [
+        { businessAccountId: 'biz-1', businessAccount: { id: 'biz-1', isActive: true } },
+      ],
+    };
+
+    const result = await service.listKnowledge(context as never, 'biz-1', { query: 'کارت' });
+
+    expect(knowledge.list).toHaveBeenCalledWith('biz-1', 1, 100, 'کارت');
+    expect(exactAnswers.list).toHaveBeenCalledWith('biz-1', 'کارت');
+    expect(result.exactAnswers).toHaveLength(1);
+    expect(result.exactAnswers[0]?.name).toBe('شماره کارت');
+  });
+
+  it('handles exact answer CRUD operations in MiniAppManagementService', async () => {
+    const exactAnswers = {
+      create: vi.fn().mockResolvedValue({ id: 'exact-1', name: 'ارسال رایگان' }),
+      get: vi.fn().mockResolvedValue({
+        id: 'exact-1',
+        name: 'ارسال رایگان',
+        content: 'ارسال رایگان بالای ۵۰۰ هزار',
+      }),
+      update: vi.fn().mockResolvedValue({ id: 'exact-1', isActive: false }),
+      delete: vi.fn().mockResolvedValue(undefined),
+    };
+    const service = new MiniAppManagementService(
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      testConfig(),
+      undefined,
+      undefined,
+      undefined,
+      exactAnswers as never,
+    );
+    const context = {
+      admin: { id: 'admin-1', role: AdminRole.ADMIN },
+      businessAccess: [
+        { businessAccountId: 'biz-1', businessAccount: { id: 'biz-1', isActive: true } },
+      ],
+    };
+
+    // create
+    const created = await service.createExactAnswer(context as never, 'biz-1', {
+      name: 'ارسال رایگان',
+      content: 'ارسال رایگان بالای ۵۰۰ هزار',
+      questions: ['هزینه ارسال چقدره؟'],
+    });
+    expect(created.id).toBe('exact-1');
+    expect(exactAnswers.create).toHaveBeenCalledWith({
+      businessAccountId: 'biz-1',
+      name: 'ارسال رایگان',
+      content: 'ارسال رایگان بالای ۵۰۰ هزار',
+      questions: ['هزینه ارسال چقدره؟'],
+      adminId: 'admin-1',
+      isActive: true,
+    });
+
+    // details
+    const details = await service.exactAnswerDetails(context as never, 'biz-1', 'exact-1');
+    expect(details.id).toBe('exact-1');
+
+    // active toggle
+    await service.setExactAnswerActive(context as never, 'biz-1', 'exact-1', false);
+    expect(exactAnswers.update).toHaveBeenCalledWith('exact-1', 'biz-1', {
+      isActive: false,
+      adminId: 'admin-1',
+    });
+
+    // delete
+    const delResult = await service.deleteExactAnswer(context as never, 'biz-1', 'exact-1');
+    expect(delResult).toEqual({ ok: true });
+    expect(exactAnswers.delete).toHaveBeenCalledWith('exact-1', 'biz-1');
+  });
 });
