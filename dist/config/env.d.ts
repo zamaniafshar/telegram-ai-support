@@ -74,6 +74,7 @@ export declare function loadConfig(source?: NodeJS.ProcessEnv): {
         readonly safeGreetingEnabled: boolean;
     };
     readonly abuseProtection: {
+        readonly enabled: boolean;
         readonly maxRequestsPerHour: number;
         readonly maxRequestsPerDay: number;
         readonly cooldownMinutes: number;

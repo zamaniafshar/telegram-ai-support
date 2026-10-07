@@ -684,16 +684,27 @@ export class ConversationProcessor {
     now: Date,
   ): Promise<string | null> {
     const limits = this.config.abuseProtection;
+    if (!limits.enabled) {
+      if (customer.aiBlockedUntil) {
+        await this.prisma.customer.update({
+          where: { id: customer.id },
+          data: { aiBlockedUntil: null },
+        });
+      }
+      if (business.aiBlockedUntil) {
+        await this.prisma.businessAccount.update({
+          where: { id: business.id },
+          data: { aiBlockedUntil: null },
+        });
+      }
+      return null;
+    }
+
     const totalCharacters = jobs.reduce((sum, job) => sum + (job.message.text?.length ?? 0), 0);
     if (jobs.length > limits.maxBatchMessages || totalCharacters > limits.maxBatchChars) {
       return 'AI_ABUSE_BATCH_TOO_LARGE';
     }
-    if (customer.aiBlockedUntil && customer.aiBlockedUntil > now) {
-      return 'AI_ABUSE_COOLDOWN_ACTIVE';
-    }
-    if (business.aiBlockedUntil && business.aiBlockedUntil > now) {
-      return 'AI_BUSINESS_BUDGET_COOLDOWN_ACTIVE';
-    }
+
     const hourlyActive = Boolean(
       customer.aiHourlyWindowStartedAt &&
       customer.aiHourlyWindowStartedAt.getTime() > now.getTime() - 3_600_000,
@@ -714,6 +725,29 @@ export class ConversationProcessor {
     );
     const businessHourlyCount = businessHourlyActive ? business.aiHourlyRequestCount : 0;
     const businessDailyCount = businessDailyActive ? business.aiDailyRequestCount : 0;
+
+    if (customer.aiBlockedUntil && customer.aiBlockedUntil > now) {
+      if (hourlyCount >= limits.maxRequestsPerHour || dailyCount >= limits.maxRequestsPerDay) {
+        return 'AI_ABUSE_COOLDOWN_ACTIVE';
+      }
+      await this.prisma.customer.update({
+        where: { id: customer.id },
+        data: { aiBlockedUntil: null },
+      });
+    }
+
+    if (business.aiBlockedUntil && business.aiBlockedUntil > now) {
+      if (
+        businessHourlyCount >= limits.businessMaxRequestsPerHour ||
+        businessDailyCount >= limits.businessMaxRequestsPerDay
+      ) {
+        return 'AI_BUSINESS_BUDGET_COOLDOWN_ACTIVE';
+      }
+      await this.prisma.businessAccount.update({
+        where: { id: business.id },
+        data: { aiBlockedUntil: null },
+      });
+    }
     if (hourlyCount >= limits.maxRequestsPerHour || dailyCount >= limits.maxRequestsPerDay) {
       await this.prisma.customer.update({
         where: { id: customer.id },

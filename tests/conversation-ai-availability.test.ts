@@ -3,7 +3,11 @@ import { ConversationMode, MessageProcessingStatus, SenderType } from '@prisma/c
 import { ConversationProcessor } from '../src/conversations/processor.js';
 import { silentLogger, testConfig } from './helpers.js';
 
-function harness(reasons: string[], texts = ['سؤال درباره محصول']) {
+function harness(
+  reasons: string[],
+  texts = ['سؤال درباره محصول'],
+  configOverrides: Record<string, string> = {},
+) {
   const now = new Date();
   const messages = texts.map((text, index) => ({
     id: `message-${index + 1}`,
@@ -126,7 +130,11 @@ function harness(reasons: string[], texts = ['سؤال درباره محصول']
     messenger as never,
     {} as never,
     availability as never,
-    testConfig({ SAFE_GREETING_ENABLED: 'false', WORKER_POLL_INTERVAL_MS: '100' }),
+    testConfig({
+      SAFE_GREETING_ENABLED: 'false',
+      WORKER_POLL_INTERVAL_MS: '100',
+      ...configOverrides,
+    }),
     silentLogger,
   );
   return { processor, prisma, retrieval, answerer, messenger, availability, jobs };
@@ -310,5 +318,43 @@ describe('conversation backlog availability gates', () => {
         }),
       }),
     );
+  });
+
+  it('bypasses abuse limits when AI_ABUSE_PROTECTION_ENABLED is false', async () => {
+    const value = harness(['AVAILABLE'], ['سؤال جدید'], {
+      AI_ABUSE_PROTECTION_ENABLED: 'false',
+    });
+    value.prisma.conversation.findUniqueOrThrow.mockReset();
+    value.prisma.conversation.findUniqueOrThrow
+      .mockResolvedValueOnce({
+        id: 'conversation-1',
+        businessAccountId: 'business-1',
+        mode: ConversationMode.AI,
+        telegramReplyWindowExpiresAt: new Date(Date.now() + 3_600_000),
+        businessAccount: {
+          id: 'business-1',
+          aiSettings: null,
+          aiHourlyWindowStartedAt: null,
+          aiHourlyRequestCount: 1000,
+          aiDailyWindowStartedAt: null,
+          aiDailyRequestCount: 5000,
+          aiBlockedUntil: new Date(Date.now() + 60_000),
+        },
+        customer: {
+          id: 'customer-1',
+          aiHourlyWindowStartedAt: new Date(),
+          aiHourlyRequestCount: 100,
+          aiDailyWindowStartedAt: new Date(),
+          aiDailyRequestCount: 100,
+          aiBlockedUntil: new Date(Date.now() + 60_000),
+        },
+        handoffs: [],
+        messages: value.jobs.map((job) => job.message),
+      })
+      .mockResolvedValue({ mode: ConversationMode.AI, messages: [] });
+
+    await value.processor.runBatch('worker-1');
+
+    expect(value.answerer.decide).toHaveBeenCalled();
   });
 });

@@ -252,7 +252,7 @@ describe('Hybrid Deterministic FAQ & Contextual Rewriting Pipeline', () => {
     expect(harness.exactMatcher.match).toHaveBeenCalledWith(
       expect.objectContaining({
         businessAccountId: 'biz-1',
-        threshold: 0.88,
+        threshold: 0.6,
       }),
     );
 

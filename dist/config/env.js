@@ -61,7 +61,7 @@ const envSchema = z.object({
         .regex(/^[a-zA-Z0-9_-]+$/)
         .default('telegram_support_exact_questions'),
     QDRANT_TIMEOUT_MS: positiveInt(10_000),
-    COPY_PASTE_THRESHOLD: z.coerce.number().min(0).max(1).default(0.88),
+    COPY_PASTE_THRESHOLD: z.coerce.number().min(0).max(1).default(0.6),
     REWRITER_TIMEOUT_MS: positiveInt(1_500),
     REWRITER_MODEL: z.string().min(1).optional(),
     RETRIEVAL_MIN_SCORE: z.coerce.number().min(0).max(1).default(0.72),
@@ -75,6 +75,10 @@ const envSchema = z.object({
     MAX_KNOWLEDGE_TITLE_LENGTH: positiveInt(200),
     MAX_KNOWLEDGE_DESCRIPTION_LENGTH: positiveInt(100_000),
     CHUNK_MAX_CHARS: z.coerce.number().int().min(300).max(10_000).default(1_800),
+    AI_ABUSE_PROTECTION_ENABLED: z
+        .enum(['true', 'false'])
+        .default('true')
+        .transform((value) => value === 'true'),
     CHUNK_OVERLAP_CHARS: z.coerce.number().int().min(0).max(2_000).default(250),
     MESSAGE_DEBOUNCE_MS: nonNegativeInt(1_200),
     AI_CUSTOMER_MAX_REQUESTS_PER_HOUR: positiveInt(10),
@@ -222,6 +226,7 @@ export function loadConfig(source = process.env) {
             safeGreetingEnabled: env.SAFE_GREETING_ENABLED,
         },
         abuseProtection: {
+            enabled: env.AI_ABUSE_PROTECTION_ENABLED,
             maxRequestsPerHour: env.AI_CUSTOMER_MAX_REQUESTS_PER_HOUR,
             maxRequestsPerDay: env.AI_CUSTOMER_MAX_REQUESTS_PER_DAY,
             cooldownMinutes: env.AI_CUSTOMER_COOLDOWN_MINUTES,
