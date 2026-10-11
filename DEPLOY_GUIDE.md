@@ -1,17 +1,6 @@
-# Deployment & Update Guide (Shared Host)
-
-A concise, step-by-step guide to deploying, running, and updating **telegram-ai-support** on a shared host or VPS with low resources.
-
----
-
-## 📋 Prerequisites
-
-- **Node.js**: v20.19+, v22.13+, or v24+
-- **MySQL**: 8.0+ or MariaDB 10.5+ (create an empty database & user first)
-- **Domain**: An active HTTPS domain (Telegram webhooks strictly require HTTPS)
-- **Process Manager**: PM2 (recommended) or your host's Node.js App Manager (cPanel / Passenger)
-
----
+git fetch origin
+git switch main
+git reset --hard origin/main
 
 ## 🚀 1. First-Time Setup & Deployment
 
