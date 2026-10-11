@@ -167,9 +167,12 @@ export function loadConfig(source: NodeJS.ProcessEnv = process.env) {
     throw new Error('Production requires an HTTPS PUBLIC_BASE_URL');
   }
 
-  const miniAppUrl = (
+  let miniAppUrl = (
     env.MINI_APP_URL || `${env.PUBLIC_BASE_URL.replace(/\/$/, '')}/mini-app/`
   ).replace(/\/$/, '');
+  if (miniAppUrl.startsWith('http://')) {
+    miniAppUrl = miniAppUrl.replace(/^http:\/\//i, 'https://');
+  }
   if (env.NODE_ENV === 'production' && !miniAppUrl.startsWith('https://')) {
     throw new Error('Production requires an HTTPS MINI_APP_URL');
   }

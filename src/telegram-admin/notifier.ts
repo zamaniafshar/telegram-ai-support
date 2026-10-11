@@ -363,7 +363,10 @@ export class AdminNotifier implements IndexingNotifier, ModeChangeNotifier {
         include: { notification: true, admin: true },
       });
       try {
-        const destination = `${this.config.telegram.miniAppUrl}${delivery.notification.destinationPath}`;
+        const destination = `${this.config.telegram.miniAppUrl}${delivery.notification.destinationPath}`.replace(
+          /^http:\/\//i,
+          'https://',
+        );
         const buttonText = delivery.notification.type.startsWith('AI_MASTER_')
           ? 'مشاهده تنظیمات'
           : 'مشاهده جزئیات';

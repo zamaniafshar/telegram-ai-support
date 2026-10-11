@@ -141,7 +141,10 @@ export function loadConfig(source = process.env) {
     if (env.NODE_ENV === 'production' && !env.PUBLIC_BASE_URL.startsWith('https://')) {
         throw new Error('Production requires an HTTPS PUBLIC_BASE_URL');
     }
-    const miniAppUrl = (env.MINI_APP_URL || `${env.PUBLIC_BASE_URL.replace(/\/$/, '')}/mini-app/`).replace(/\/$/, '');
+    let miniAppUrl = (env.MINI_APP_URL || `${env.PUBLIC_BASE_URL.replace(/\/$/, '')}/mini-app/`).replace(/\/$/, '');
+    if (miniAppUrl.startsWith('http://')) {
+        miniAppUrl = miniAppUrl.replace(/^http:\/\//i, 'https://');
+    }
     if (env.NODE_ENV === 'production' && !miniAppUrl.startsWith('https://')) {
         throw new Error('Production requires an HTTPS MINI_APP_URL');
     }

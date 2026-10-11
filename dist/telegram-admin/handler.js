@@ -66,7 +66,9 @@ export class AdminBotHandler {
         }
         await this.telegram.sendMessage(chatId, adminBotText.launch, {
             replyMarkup: {
-                inline_keyboard: [[{ text: 'باز کردن پنل مدیریت', web_app: { url: this.miniAppUrl } }]],
+                inline_keyboard: [
+                    [{ text: 'باز کردن پنل مدیریت', web_app: { url: this.miniAppUrl.replace(/^http:\/\//i, 'https://') } }],
+                ],
             },
         });
         this.logger?.trace({
