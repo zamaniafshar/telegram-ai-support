@@ -343,6 +343,7 @@ export class ConversationProcessor {
             return true;
         }
         let answer = route.kind === 'SAFE_GREETING' ? route.answer : null;
+        let isCopyPaste = false;
         if (!answer) {
             this.logger.trace({
                 category: 'AI',
@@ -454,6 +455,7 @@ export class ConversationProcessor {
                 return true;
             }
             answer = decision.answer;
+            isCopyPaste = decision.decision === 'COPY_PASTE_EXACT_MATCH';
         }
         else {
             await this.#updateTrace(firstJob.messageId, {
@@ -484,7 +486,9 @@ export class ConversationProcessor {
             batchId,
             answerLength: answer.length,
         }, 'dispatching AI answer to messenger');
-        await this.messenger.sendAiAnswer(conversationId, answer, firstJob.messageId);
+        await this.messenger.sendAiAnswer(conversationId, answer, firstJob.messageId, {
+            isCopyPaste,
+        });
         await this.#finishBatch(jobs, MessageProcessingStatus.PROCESSED, batchId, null);
         await this.#audit(conversation.businessAccountId, conversationId, 'AI_MESSAGE_BATCH_PROCESSED', { messageCount: jobs.length, batchId });
         await this.#setTraceOutcome(firstJob.messageId, AiTraceOutcome.SENT, null, traceStartedAt);

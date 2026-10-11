@@ -1,7 +1,7 @@
 import { ConversationMode, MessageDirection, MessageProcessingStatus, SenderType, } from '@prisma/client';
 import { AppError } from '../utils/errors.js';
 import { newId, telegramId } from '../utils/ids.js';
-import { calculateTypingDelayMs, splitSupportAnswer } from './splitter.js';
+import { calculateTypingDelayMs, splitCopyPasteAnswer, splitSupportAnswer } from './splitter.js';
 import { isTelegramEntityParseError, sanitizeTelegramHtml, stripHtml, } from '../utils/telegram-format.js';
 const typingRefreshMs = 4_000;
 export class BusinessMessenger {
@@ -15,13 +15,15 @@ export class BusinessMessenger {
         this.config = config;
         this.logger = logger;
     }
-    async sendAiAnswer(conversationId, text, sourceMessageId) {
+    async sendAiAnswer(conversationId, text, sourceMessageId, options) {
         if (await this.prisma.message.findUnique({ where: { sourceMessageId } })) {
             this.logger.info({ conversationId, sourceMessageId }, 'duplicate business send suppressed');
             return;
         }
         const { conversation, connection } = await this.#validateAndGetContext(conversationId, false);
-        const parts = splitSupportAnswer(text);
+        const parts = options?.isCopyPaste || text.includes('***')
+            ? splitCopyPasteAnswer(text)
+            : splitSupportAnswer(text);
         this.logger.trace({
             category: 'TELEGRAM',
             conversationId,

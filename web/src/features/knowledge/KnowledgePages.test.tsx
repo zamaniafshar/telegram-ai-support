@@ -169,7 +169,7 @@ describe('DraftEditorPage at /knowledge/new', () => {
 
     const titleInput = screen.getByPlaceholderText(/شماره شبا و کارت فروشگاه/i);
     const questionsTextarea = screen.getByPlaceholderText(/شماره حساب برای واریز چیه/i);
-    const contentTextarea = screen.getByPlaceholderText(/متن کامل و دقیق پاسخ را بنویسید/i);
+    const contentTextarea = screen.getByPlaceholderText(/متن پیام اول/i);
 
     await userEvent.type(titleInput, 'شماره حساب');
     await userEvent.type(questionsTextarea, 'شماره کارت بدید');

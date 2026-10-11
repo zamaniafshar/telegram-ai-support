@@ -261,4 +261,88 @@ describe('business AI message formatting and splitting', () => {
     );
     vi.useRealTimers();
   });
+
+  it('splits copy-paste answers based on *** delimiter into distinct messages', async () => {
+    vi.useFakeTimers();
+    const prisma = {
+      conversation: {
+        findUniqueOrThrow: vi.fn().mockResolvedValue(conversation(ConversationMode.AI)),
+      },
+      message: {
+        findUnique: vi.fn().mockResolvedValue(null),
+        upsert: vi.fn().mockResolvedValue({}),
+      },
+    };
+    const telegram = {
+      sendMessage: vi.fn().mockResolvedValue({ message_id: 41, date: 1_700_000_000 }),
+      sendChatAction: vi.fn().mockResolvedValue(undefined),
+    };
+    const messenger = new BusinessMessenger(
+      prisma as never,
+      telegram as never,
+      testConfig(),
+      silentLogger,
+    );
+
+    const copyPasteText =
+      'سلام وقت بخیر 🌱 به کانال ما خوش آمدید.\n***\nلینک ثبت نام:\nhttps://example.com/register\n***\nدر صورت نیاز پیام دهید!';
+
+    const sendPromise = messenger.sendAiAnswer('conversation-1', copyPasteText, 'source-cp-1', {
+      isCopyPaste: true,
+    });
+    await vi.runAllTimersAsync();
+    await sendPromise;
+
+    expect(telegram.sendMessage).toHaveBeenCalledTimes(3);
+    expect(telegram.sendMessage).toHaveBeenNthCalledWith(
+      1,
+      123n,
+      'سلام وقت بخیر 🌱 به کانال ما خوش آمدید.',
+      expect.anything(),
+    );
+    expect(telegram.sendMessage).toHaveBeenNthCalledWith(
+      2,
+      123n,
+      'لینک ثبت نام:\nhttps://example.com/register',
+      expect.anything(),
+    );
+    expect(telegram.sendMessage).toHaveBeenNthCalledWith(
+      3,
+      123n,
+      'در صورت نیاز پیام دهید!',
+      expect.anything(),
+    );
+    vi.useRealTimers();
+  });
+
+  it('keeps copy-paste answers without *** as a single message even with paragraphs', async () => {
+    const prisma = {
+      conversation: {
+        findUniqueOrThrow: vi.fn().mockResolvedValue(conversation(ConversationMode.AI)),
+      },
+      message: {
+        findUnique: vi.fn().mockResolvedValue(null),
+        upsert: vi.fn().mockResolvedValue({}),
+      },
+    };
+    const telegram = {
+      sendMessage: vi.fn().mockResolvedValue({ message_id: 51, date: 1_700_000_000 }),
+    };
+    const messenger = new BusinessMessenger(
+      prisma as never,
+      telegram as never,
+      testConfig(),
+      silentLogger,
+    );
+
+    const singleBlock =
+      'پاراگراف اول کپی‌پیست.\n\nپاراگراف دوم کپی‌پیست.\n\nپاراگراف سوم کپی‌پیست.';
+
+    await messenger.sendAiAnswer('conversation-1', singleBlock, 'source-cp-2', {
+      isCopyPaste: true,
+    });
+
+    expect(telegram.sendMessage).toHaveBeenCalledTimes(1);
+    expect(telegram.sendMessage).toHaveBeenCalledWith(123n, singleBlock, expect.anything());
+  });
 });

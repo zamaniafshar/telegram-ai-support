@@ -12,7 +12,7 @@ import type { TelegramApi } from './client.js';
 import type { SentTelegramMessage } from './types.js';
 import { AppError } from '../utils/errors.js';
 import { newId, telegramId } from '../utils/ids.js';
-import { calculateTypingDelayMs, splitSupportAnswer } from './splitter.js';
+import { calculateTypingDelayMs, splitCopyPasteAnswer, splitSupportAnswer } from './splitter.js';
 import {
   isTelegramEntityParseError,
   sanitizeTelegramHtml,
@@ -20,6 +20,10 @@ import {
 } from '../utils/telegram-format.js';
 
 const typingRefreshMs = 4_000;
+
+export interface SendAiAnswerOptions {
+  isCopyPaste?: boolean;
+}
 
 export class BusinessMessenger {
   constructor(
@@ -29,14 +33,22 @@ export class BusinessMessenger {
     private readonly logger: Logger,
   ) {}
 
-  async sendAiAnswer(conversationId: string, text: string, sourceMessageId: string): Promise<void> {
+  async sendAiAnswer(
+    conversationId: string,
+    text: string,
+    sourceMessageId: string,
+    options?: SendAiAnswerOptions,
+  ): Promise<void> {
     if (await this.prisma.message.findUnique({ where: { sourceMessageId } })) {
       this.logger.info({ conversationId, sourceMessageId }, 'duplicate business send suppressed');
       return;
     }
 
     const { conversation, connection } = await this.#validateAndGetContext(conversationId, false);
-    const parts = splitSupportAnswer(text);
+    const parts =
+      options?.isCopyPaste || text.includes('***')
+        ? splitCopyPasteAnswer(text)
+        : splitSupportAnswer(text);
 
     this.logger.trace(
       {

@@ -264,6 +264,7 @@ describe('Hybrid Deterministic FAQ & Contextual Rewriting Pipeline', () => {
       'conv-1',
       verbatimFaqAnswer,
       'msg-incoming-1',
+      { isCopyPaste: true },
     );
 
     // 6. Trace log recorded DECISION: COPY_PASTE_EXACT_MATCH and exact match metadata
@@ -316,6 +317,7 @@ describe('Hybrid Deterministic FAQ & Contextual Rewriting Pipeline', () => {
       'conv-1',
       'پرداخت اقساطی در دو مرحله امکان‌پذیر است.',
       'msg-incoming-1',
+      { isCopyPaste: false },
     );
   });
 });

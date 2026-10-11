@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { calculateTypingDelayMs, splitSupportAnswer } from '../src/telegram-business/splitter.js';
+import {
+  calculateTypingDelayMs,
+  splitCopyPasteAnswer,
+  splitSupportAnswer,
+} from '../src/telegram-business/splitter.js';
 import {
   isTelegramEntityParseError,
   sanitizeTelegramHtml,
@@ -177,5 +181,59 @@ describe('isTelegramEntityParseError', () => {
       true,
     );
     expect(isTelegramEntityParseError(new Error('Network timeout'))).toBe(false);
+  });
+});
+
+describe('splitCopyPasteAnswer', () => {
+  it('splits exact copy-paste answer based on *** separator into distinct messages', () => {
+    const text = `سلام وقتتون بخیر 🌱\nبه پشتیبانی خوش آمدید.\n***\nجهت ثبت‌نام به لینک زیر مراجعه کنید:\nhttps://example.com/register\n***\nدر صورت داشتن هرگونه سوال در خدمتیم!`;
+    const parts = splitCopyPasteAnswer(text);
+
+    expect(parts).toHaveLength(3);
+    expect(parts[0]).toBe('سلام وقتتون بخیر 🌱\nبه پشتیبانی خوش آمدید.');
+    expect(parts[1]).toBe('جهت ثبت‌نام به لینک زیر مراجعه کنید:\nhttps://example.com/register');
+    expect(parts[2]).toBe('در صورت داشتن هرگونه سوال در خدمتیم!');
+  });
+
+  it('splits when *** is separated by single spaces or newlines', () => {
+    const text = 'پیام اول *** پیام دوم *** پیام سوم';
+    const parts = splitCopyPasteAnswer(text);
+
+    expect(parts).toEqual(['پیام اول', 'پیام دوم', 'پیام سوم']);
+  });
+
+  it('handles 4 or more asterisks as separator', () => {
+    const text = 'بخش اول\n****\nبخش دوم\n*****\nبخش سوم';
+    const parts = splitCopyPasteAnswer(text);
+
+    expect(parts).toEqual(['بخش اول', 'بخش دوم', 'بخش سوم']);
+  });
+
+  it('filters empty chunks from leading, trailing, or double ***', () => {
+    const text = '***\nپیام ۱\n***\n***\nپیام ۲\n***';
+    const parts = splitCopyPasteAnswer(text);
+
+    expect(parts).toEqual(['پیام ۱', 'پیام ۲']);
+  });
+
+  it('preserves answer verbatim as single message when *** is NOT present, even with multiple paragraphs', () => {
+    const text = `سلام وقتتون بخیر 🌱\n\nاین یک پاسخ کپی‌پیست با چند پاراگراف است.\n\nتوضیحات تکمیلی و لینک:\nhttps://example.com`;
+    const parts = splitCopyPasteAnswer(text);
+
+    expect(parts).toHaveLength(1);
+    expect(parts[0]).toBe(text.trim());
+  });
+
+  it('handles empty or whitespace strings', () => {
+    expect(splitCopyPasteAnswer('')).toEqual([]);
+    expect(splitCopyPasteAnswer('   ')).toEqual([]);
+    expect(splitCopyPasteAnswer('***')).toEqual([]);
+  });
+
+  it('delegates to splitCopyPasteAnswer when isCopyPaste option is true in splitSupportAnswer', () => {
+    const text = 'پیام اول *** پیام دوم';
+    const parts = splitSupportAnswer(text, { isCopyPaste: true });
+
+    expect(parts).toEqual(['پیام اول', 'پیام دوم']);
   });
 });

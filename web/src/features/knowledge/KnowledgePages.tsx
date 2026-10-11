@@ -760,9 +760,12 @@ export function DraftEditorPage() {
                       value={exactContent}
                       onChange={(e) => setExactContent(e.target.value)}
                       style={{ minHeight: '180px' }}
-                      placeholder="متن کامل و دقیق پاسخ را بنویسید (پشتیبانی از اموجی، لینک و خطوط جدید)..."
+                      placeholder={`متن پیام اول...\n***\nمتن پیام دوم (ارسال به عنوان پیام مجزا در تلگرام)...`}
                     />
-                    <small>این متن عیناً و بدون دخل و تصرف مدل برای مشتری ارسال خواهد شد.</small>
+                    <small>
+                      این متن عیناً برای مشتری ارسال می‌شود. برای تقسیم پاسخ به چند پیام مجزا در
+                      تلگرام، بین پیام‌ها از جداکننده <strong>***</strong> استفاده کنید.
+                    </small>
                   </label>
                   <label
                     style={{
@@ -1025,8 +1028,12 @@ export function ExactAnswerDetailPage() {
                     value={editContent}
                     onChange={(e) => setEditContent(e.target.value)}
                     style={{ minHeight: '180px' }}
+                    placeholder={`متن پیام اول...\n***\nمتن پیام دوم (ارسال به عنوان پیام مجزا در تلگرام)...`}
                   />
-                  <small>این متن عیناً و مستقیم برای مشتری ارسال می‌شود.</small>
+                  <small>
+                    این متن عیناً برای مشتری ارسال می‌شود. برای تفکیک پیام‌ها در تلگرام از جداکننده{' '}
+                    <strong>***</strong> استفاده کنید.
+                  </small>
                 </label>
                 <label
                   style={{
@@ -1083,10 +1090,57 @@ export function ExactAnswerDetailPage() {
           ) : (
             <div className="split-grid">
               <section className="grid" style={{ display: 'grid', gap: '16px' }}>
-                <Card title="متن دقیق پاسخ (کپی‌پیست)">
-                  <p className="pre-wrap" dir="auto">
-                    {item.content}
-                  </p>
+                <Card
+                  title={`متن دقیق پاسخ (کپی‌پیست)${
+                    item.content.includes('***')
+                      ? ` (${item.content
+                          .split(/(?:\r?\n)*\s*\*{3,}\s*(?:\r?\n)*/)
+                          .map((p) => p.trim())
+                          .filter(Boolean)
+                          .length.toLocaleString('fa-IR')} پیام مجزا)`
+                      : ''
+                  }`}
+                >
+                  {item.content.includes('***') ? (
+                    <div style={{ display: 'grid', gap: '10px' }}>
+                      {item.content
+                        .split(/(?:\r?\n)*\s*\*{3,}\s*(?:\r?\n)*/)
+                        .map((p) => p.trim())
+                        .filter(Boolean)
+                        .map((part, pIdx) => (
+                          <div
+                            key={pIdx}
+                            className="chunk"
+                            dir="auto"
+                            style={{
+                              borderRight: '3px solid var(--primary, #0ea5e9)',
+                              background: 'var(--surface-sunken, #0f172a)',
+                              padding: '10px 14px',
+                              borderRadius: '8px',
+                            }}
+                          >
+                            <span
+                              className="muted"
+                              style={{
+                                fontSize: '0.8rem',
+                                display: 'block',
+                                marginBottom: '4px',
+                                fontWeight: 600,
+                              }}
+                            >
+                              پیام {(pIdx + 1).toLocaleString('fa-IR')}
+                            </span>
+                            <p className="pre-wrap" style={{ margin: 0 }}>
+                              {part}
+                            </p>
+                          </div>
+                        ))}
+                    </div>
+                  ) : (
+                    <p className="pre-wrap" dir="auto">
+                      {item.content}
+                    </p>
+                  )}
                 </Card>
                 <Card
                   title={`نمونه سوالات مرتبط (${item.questions.length.toLocaleString('fa-IR')} سوال)`}

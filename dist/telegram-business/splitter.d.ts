@@ -23,7 +23,27 @@ export interface SplitOptions {
      * Optional custom split delimiter pattern or string.
      */
     delimiter?: RegExp | string;
+    /**
+     * Set to true if this is an exact copy-paste answer.
+     * Uses *** (or ===SPLIT===) as explicit message separator.
+     * If *** is absent, preserves the answer verbatim without auto-splitting paragraphs.
+     */
+    isCopyPaste?: boolean;
 }
+export declare const DEFAULT_SPLIT_DELIMITER: RegExp;
+/**
+ * Delimiter regex for copy-paste answers:
+ * - 3 or more asterisks with optional surrounding newlines/whitespace (e.g. "***" or "\n***\n")
+ * - Legacy ===SPLIT=== delimiter
+ */
+export declare const COPY_PASTE_SPLIT_DELIMITER: RegExp;
+/**
+ * Splits exact copy-paste answers based on *** delimiter into distinct messages.
+ * If *** is present, splits on *** and returns each non-empty trimmed chunk.
+ * If *** is not present, preserves the answer verbatim as a single message
+ * (splitting only if it exceeds Telegram's 4,000 char message length limit).
+ */
+export declare function splitCopyPasteAnswer(rawText: string): string[];
 /**
  * Splits an answer into 1 to `maxChunks` logical message chunks.
  */

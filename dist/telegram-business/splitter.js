@@ -2,7 +2,37 @@
  * Splits long AI support answers into multiple natural messages for Telegram.
  * Avoids sending one massive wall of text or breaking titles across bubbles.
  */
-const DEFAULT_SPLIT_DELIMITER = /(?:\r?\n)*\s*===SPLIT===\s*(?:\r?\n)*/;
+export const DEFAULT_SPLIT_DELIMITER = /(?:\r?\n)*\s*===SPLIT===\s*(?:\r?\n)*/;
+/**
+ * Delimiter regex for copy-paste answers:
+ * - 3 or more asterisks with optional surrounding newlines/whitespace (e.g. "***" or "\n***\n")
+ * - Legacy ===SPLIT=== delimiter
+ */
+export const COPY_PASTE_SPLIT_DELIMITER = /(?:\r?\n)*\s*(?:\*{3,}|===SPLIT===)\s*(?:\r?\n)*/;
+/**
+ * Splits exact copy-paste answers based on *** delimiter into distinct messages.
+ * If *** is present, splits on *** and returns each non-empty trimmed chunk.
+ * If *** is not present, preserves the answer verbatim as a single message
+ * (splitting only if it exceeds Telegram's 4,000 char message length limit).
+ */
+export function splitCopyPasteAnswer(rawText) {
+    const trimmed = rawText.trim();
+    if (!trimmed)
+        return [];
+    // Check if explicit separator is present (*** or ===SPLIT===)
+    if (trimmed.includes('***') || trimmed.includes('===SPLIT===')) {
+        const parts = trimmed
+            .split(COPY_PASTE_SPLIT_DELIMITER)
+            .map((p) => p.trim())
+            .filter((p) => p.length > 0);
+        return parts.flatMap((part) => (part.length > 4_000 ? splitSupportAnswer(part) : [part]));
+    }
+    // If no *** separator, preserve verbatim as single message (unless over 4,000 chars)
+    if (trimmed.length > 4_000) {
+        return splitSupportAnswer(trimmed);
+    }
+    return [trimmed];
+}
 /**
  * Splits an answer into 1 to `maxChunks` logical message chunks.
  */
@@ -10,6 +40,9 @@ export function splitSupportAnswer(rawText, options = {}) {
     const trimmed = rawText.trim();
     if (!trimmed)
         return [];
+    if (options.isCopyPaste) {
+        return splitCopyPasteAnswer(rawText);
+    }
     // 1. Explicit AI delimiter (===SPLIT=== or options.delimiter)
     if (options.delimiter) {
         const parts = trimmed
