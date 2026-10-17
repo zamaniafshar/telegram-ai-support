@@ -9,6 +9,11 @@ const mockHasCapability = vi.fn();
 
 vi.mock('../../app/SessionProvider', () => ({
   useSession: () => ({
+    session: {
+      admin: { id: 'admin-1', displayName: 'مدیر سامانه', role: 'ADMIN' },
+      businesses: [],
+      developmentMode: false,
+    },
     hasCapability: mockHasCapability,
     businessPath: (path: string) => `/api/v1/businesses/business-1${path}`,
   }),

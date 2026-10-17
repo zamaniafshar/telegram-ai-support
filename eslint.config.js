@@ -2,7 +2,16 @@ import eslint from '@eslint/js';
 import tseslint from 'typescript-eslint';
 
 export default tseslint.config(
-  { ignores: ['dist/**', 'web/dist/**', 'coverage/**', 'node_modules/**', 'prisma/migrations/**'] },
+  {
+    ignores: [
+      'dist/**',
+      'web/dist/**',
+      'coverage/**',
+      'node_modules/**',
+      'prisma/migrations/**',
+      'app_wrapper.cjs',
+    ],
+  },
   eslint.configs.recommended,
   ...tseslint.configs.strictTypeChecked,
   ...tseslint.configs.stylisticTypeChecked,

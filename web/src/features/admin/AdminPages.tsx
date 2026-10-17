@@ -262,24 +262,43 @@ const descriptions: Record<string, string> = {
   '/settings': 'پیکربندی عملیاتی',
 };
 export function MorePage() {
-  const { hasCapability } = useSession();
+  const { session, hasCapability } = useSession();
   const links = [
-    ...(hasCapability('analytics:read') ? [['/analytics', '⌁', 'تحلیل پاسخ‌های هوشمند']] : []),
-    ...(hasCapability('knowledge:manage') ? [['/knowledge', '▤', 'مدیریت دانش']] : []),
-    ['/system', '♡', 'سلامت و عیب‌یابی'],
-    ...(hasCapability('admin:manage') ? [['/admins', '♙', 'مدیران']] : []),
-    ['/notifications', '♢', 'اعلان‌ها'],
-    ...(hasCapability('settings:read') ? [['/settings', '⚙', 'تنظیمات']] : []),
+    ...(hasCapability('analytics:read')
+      ? [['/analytics', '⌁', 'تحلیل پاسخ‌های هوشمند'] as const]
+      : []),
+    ...(hasCapability('knowledge:manage') ? [['/knowledge', '▤', 'مدیریت دانش'] as const] : []),
+    ['/system', '♡', 'سلامت و عیب‌یابی'] as const,
+    ...(hasCapability('admin:manage') ? [['/admins', '♙', 'مدیران'] as const] : []),
+    ['/notifications', '♢', 'اعلان‌ها'] as const,
+    ...(hasCapability('settings:read') ? [['/settings', '⚙', 'تنظیمات'] as const] : []),
   ];
   return (
     <>
       <PageHeader title="بیشتر" subtitle="تحلیل‌ها، مدیریت دانش، سلامت و دسترسی‌ها" />
+      <div className="admin-profile-card">
+        <div className="brand-mark brand-mark-sm">
+          {session.admin.displayName ? session.admin.displayName.charAt(0) : 'م'}
+        </div>
+        <div className="admin-profile-info">
+          <strong>{session.admin.displayName ?? 'مدیر سامانه'}</strong>
+          <span>{faLabel(session.admin.role)}</span>
+        </div>
+        <Badge status={session.admin.role}>{faLabel(session.admin.role)}</Badge>
+      </div>
       <div className="more-grid">
         {links.map(([path, icon, label]) => (
           <Link className="more-link" to={path} key={path}>
-            <span aria-hidden="true">{icon}</span>
-            <strong>{label}</strong>
-            <small>{descriptions[path]}</small>
+            <span aria-hidden="true" className="more-icon">
+              {icon}
+            </span>
+            <div className="more-info">
+              <strong>{label}</strong>
+              <small>{descriptions[path]}</small>
+            </div>
+            <span className="more-chevron" aria-hidden="true">
+              ‹
+            </span>
           </Link>
         ))}
       </div>

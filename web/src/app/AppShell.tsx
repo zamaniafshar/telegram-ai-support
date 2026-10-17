@@ -68,7 +68,10 @@ export function AppShell() {
         )}
         <header className="topbar">
           <div className="topbar-brand">
-            <strong>پنل مدیریت پشتیبانی</strong>
+            <div className="brand-mark brand-mark-sm" aria-hidden="true">
+              پ
+            </div>
+            <strong className="topbar-title">پنل مدیریت</strong>
           </div>
           <div className="topbar-actions">
             {session.businesses.length > 1 && (
@@ -109,12 +112,32 @@ export function AppShell() {
         </main>
       </div>
       <nav className="bottom-nav" aria-label="ناوبری اصلی">
-        {[...primary, ['/more', '•••', 'بیشتر'] as const].map(([path, icon, label]) => (
-          <NavLink key={path} className="nav-item" to={path}>
-            <span aria-hidden="true">{icon}</span>
-            <span>{label}</span>
-          </NavLink>
-        ))}
+        {[...primary, ['/more', '•••', 'بیشتر'] as const].map(([path, icon, label]) => {
+          const isSubActive =
+            path === '/more' &&
+            [
+              '/analytics',
+              '/knowledge',
+              '/system',
+              '/admins',
+              '/notifications',
+              '/settings',
+              '/logs',
+            ].some((p) => location.pathname.startsWith(p));
+          return (
+            <NavLink
+              key={path}
+              className={({ isActive }) => `nav-item ${isActive || isSubActive ? 'active' : ''}`}
+              to={path}
+              onClick={() => {
+                telegram?.HapticFeedback?.selectionChanged();
+              }}
+            >
+              <span aria-hidden="true">{icon}</span>
+              <span>{label}</span>
+            </NavLink>
+          );
+        })}
       </nav>
     </div>
   );
