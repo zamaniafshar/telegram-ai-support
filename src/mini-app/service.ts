@@ -204,6 +204,12 @@ export class MiniAppManagementService {
           topRetrievalScore: true,
           totalLatencyMs: true,
           createdAt: true,
+          errorCode: true,
+          outcomeReason: true,
+          wasRewritten: true,
+          rewrittenQuery: true,
+          matchedExactQuestionId: true,
+          exactMatchScore: true,
         },
       }),
     ]);
@@ -214,9 +220,17 @@ export class MiniAppManagementService {
         decision: trace.decision,
         answerable: trace.answerable,
         outcome: trace.outcome,
+        outcomeReason: trace.outcomeReason,
+        errorCode: trace.errorCode,
         confidence: trace.confidence,
         topRetrievalScore: trace.topRetrievalScore,
         latencyMs: trace.totalLatencyMs,
+        wasRewritten: trace.wasRewritten,
+        rewrittenQuery: trace.rewrittenQuery,
+        isCopyPaste: Boolean(
+          trace.matchedExactQuestionId || trace.decision === 'COPY_PASTE_EXACT_MATCH',
+        ),
+        exactMatchScore: trace.exactMatchScore,
         createdAt: trace.createdAt,
       })),
       page: options.page,
@@ -251,6 +265,49 @@ export class MiniAppManagementService {
       ),
     );
     const canViewPromptInternals = context.admin.role !== AdminRole.SUPPORT;
+
+    let exactMatch: {
+      matched: boolean;
+      score: number | null;
+      questionId: string | null;
+      questionText: string | null;
+      answerId: string | null;
+      answerName: string | null;
+      answerContent: string | null;
+    } | null = null;
+
+    if (trace.matchedExactQuestionId) {
+      const q = this.prisma.exactQuestion
+        ? await this.prisma.exactQuestion.findFirst({
+            where: { id: trace.matchedExactQuestionId },
+            include: { exactAnswer: { select: { id: true, name: true, content: true } } },
+          })
+        : null;
+      if (q) {
+        exactMatch = {
+          matched: true,
+          score: trace.exactMatchScore,
+          questionId: q.id,
+          questionText: q.questionText,
+          answerId: q.exactAnswer.id,
+          answerName: q.exactAnswer.name,
+          answerContent: q.exactAnswer.content,
+        };
+      }
+    } else if (trace.decision === 'COPY_PASTE_EXACT_MATCH') {
+      exactMatch = {
+        matched: true,
+        score: trace.exactMatchScore ?? trace.confidence,
+        questionId: null,
+        questionText: trace.reason?.startsWith('EXACT_FAQ_MATCH: ')
+          ? trace.reason.replace('EXACT_FAQ_MATCH: ', '')
+          : null,
+        answerId: null,
+        answerName: 'پاسخ مستقیم کپی‌پیست FAQ',
+        answerContent: trace.answer,
+      };
+    }
+
     return {
       id: trace.id,
       createdAt: trace.createdAt,
@@ -259,6 +316,11 @@ export class MiniAppManagementService {
       conversationContext: canViewPromptInternals
         ? this.#jsonArray(trace.conversationContext)
         : null,
+      queryRewrite: {
+        wasRewritten: Boolean(trace.wasRewritten),
+        rewrittenQuery: trace.rewrittenQuery ?? null,
+      },
+      exactMatch,
       retrieval: {
         raw,
         validated: this.#jsonArray(trace.validatedRetrievalResults),

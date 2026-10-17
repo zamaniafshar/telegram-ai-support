@@ -1193,8 +1193,15 @@ export class ConversationProcessor {
       },
       `conversation batch failed: ${code}`,
     );
+    const totalLatencyMs = firstJob.message.sentAt
+      ? Math.max(0, Date.now() - firstJob.message.sentAt.getTime())
+      : null;
     if (!shouldHandoffExternalFailure(attempts, maxAttempts)) {
-      await this.#updateTrace(firstJob.messageId, { errorCode: code });
+      await this.#updateTrace(firstJob.messageId, {
+        errorCode: code,
+        outcomeReason: 'EXTERNAL_SERVICE_FAILURE',
+        totalLatencyMs,
+      });
       await this.prisma.conversationJob.updateMany({
         where: { id: { in: jobs.map((job) => job.id) } },
         data: {
@@ -1224,6 +1231,7 @@ export class ConversationProcessor {
       outcome: AiTraceOutcome.FAILED,
       outcomeReason: 'EXTERNAL_SERVICE_FAILURE',
       errorCode: code,
+      totalLatencyMs,
       completedAt: new Date(),
     });
     void this.notifier;

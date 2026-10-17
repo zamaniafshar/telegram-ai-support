@@ -169,6 +169,105 @@ describe('AI analytics authorization and trace projection', () => {
       expect(findFirst).toHaveBeenCalledTimes(1);
     },
   );
+
+  it('projects query rewriting and exact copy-paste FAQ match details', async () => {
+    const customTrace = {
+      ...trace(),
+      wasRewritten: true,
+      rewrittenQuery: 'هزینه و شرایط ثبت‌نام کنکور امسال',
+      decision: 'COPY_PASTE_EXACT_MATCH',
+      matchedExactQuestionId: 'q-101',
+      exactMatchScore: 0.96,
+      answer: 'پاسخ کپی‌پیست تست',
+    };
+    const mockExactQuestion = {
+      id: 'q-101',
+      questionText: 'شرایط ثبت نام کنکور امسال',
+      exactAnswer: {
+        id: 'ans-101',
+        name: 'ثبت‌نام کنکور سراسری',
+        content: 'پاسخ کپی‌پیست تست',
+      },
+    };
+    const prisma = {
+      aiDecisionLog: { findFirst: vi.fn().mockResolvedValue(customTrace) },
+      exactQuestion: { findFirst: vi.fn().mockResolvedValue(mockExactQuestion) },
+    };
+    const service = new MiniAppManagementService(
+      prisma as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      testConfig(),
+    );
+
+    const result = await service.analyticsTraceDetails(
+      context(AdminRole.ADMIN) as never,
+      'business-1',
+      'trace-1',
+    );
+
+    expect(result.queryRewrite).toEqual({
+      wasRewritten: true,
+      rewrittenQuery: 'هزینه و شرایط ثبت‌نام کنکور امسال',
+    });
+    expect(result.exactMatch).toEqual({
+      matched: true,
+      score: 0.96,
+      questionId: 'q-101',
+      questionText: 'شرایط ثبت نام کنکور امسال',
+      answerId: 'ans-101',
+      answerName: 'ثبت‌نام کنکور سراسری',
+      answerContent: 'پاسخ کپی‌پیست تست',
+    });
+  });
+
+  it('projects failure diagnostics and error codes in trace list and detail', async () => {
+    const failedTrace = {
+      ...trace(),
+      outcome: 'FAILED',
+      outcomeReason: 'EXTERNAL_SERVICE_FAILURE',
+      errorCode: 'OPENAI_TIMEOUT',
+      totalLatencyMs: 30500,
+    };
+    const prisma = {
+      aiDecisionLog: {
+        count: vi.fn().mockResolvedValue(1),
+        findMany: vi.fn().mockResolvedValue([failedTrace]),
+        findFirst: vi.fn().mockResolvedValue(failedTrace),
+      },
+    };
+    const service = new MiniAppManagementService(
+      prisma as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      testConfig(),
+    );
+
+    const listResult = await service.analyticsTraces(
+      context(AdminRole.ADMIN) as never,
+      'business-1',
+      { page: 1, pageSize: 10 },
+    );
+    expect(listResult.items[0]).toMatchObject({
+      errorCode: 'OPENAI_TIMEOUT',
+      outcomeReason: 'EXTERNAL_SERVICE_FAILURE',
+      latencyMs: 30500,
+    });
+
+    const detailResult = await service.analyticsTraceDetails(
+      context(AdminRole.ADMIN) as never,
+      'business-1',
+      'trace-1',
+    );
+    expect(detailResult.outcome).toMatchObject({
+      status: 'FAILED',
+      reason: 'EXTERNAL_SERVICE_FAILURE',
+      errorCode: 'OPENAI_TIMEOUT',
+      totalLatencyMs: 30500,
+    });
+  });
 });
 
 describe('AI analytics retention and privacy', () => {

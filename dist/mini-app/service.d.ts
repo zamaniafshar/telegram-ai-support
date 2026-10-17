@@ -89,9 +89,15 @@ export declare class MiniAppManagementService {
             decision: string | null;
             answerable: boolean | null;
             outcome: import("@prisma/client").$Enums.AiTraceOutcome;
+            outcomeReason: string | null;
+            errorCode: string | null;
             confidence: number | null;
             topRetrievalScore: number | null;
             latencyMs: number | null;
+            wasRewritten: boolean;
+            rewrittenQuery: string | null;
+            isCopyPaste: boolean;
+            exactMatchScore: number | null;
             createdAt: Date;
         }[];
         page: number;
@@ -105,6 +111,19 @@ export declare class MiniAppManagementService {
         completedAt: Date | null;
         customerMessages: Record<string, unknown>[];
         conversationContext: Record<string, unknown>[] | null;
+        queryRewrite: {
+            wasRewritten: boolean;
+            rewrittenQuery: string | null;
+        };
+        exactMatch: {
+            matched: boolean;
+            score: number | null;
+            questionId: string | null;
+            questionText: string | null;
+            answerId: string | null;
+            answerName: string | null;
+            answerContent: string | null;
+        } | null;
         retrieval: {
             raw: Record<string, unknown>[];
             validated: Record<string, unknown>[];

@@ -23,9 +23,15 @@ interface TraceSummary {
   decision: string | null;
   answerable: boolean | null;
   outcome: string;
+  outcomeReason?: string | null;
+  errorCode?: string | null;
   confidence: number | null;
   topRetrievalScore: number | null;
   latencyMs: number | null;
+  wasRewritten?: boolean;
+  rewrittenQuery?: string | null;
+  isCopyPaste?: boolean;
+  exactMatchScore?: number | null;
   createdAt: string;
 }
 
@@ -56,6 +62,19 @@ interface TraceDetail {
   completedAt: string | null;
   customerMessages: { id?: string; text?: string; sentAt?: string }[];
   conversationContext: { senderType?: string; text?: string; sentAt?: string }[] | null;
+  queryRewrite?: {
+    wasRewritten: boolean;
+    rewrittenQuery: string | null;
+  } | null;
+  exactMatch?: {
+    matched: boolean;
+    score: number | null;
+    questionId: string | null;
+    questionText: string | null;
+    answerId: string | null;
+    answerName: string | null;
+    answerContent: string | null;
+  } | null;
   retrieval: {
     raw: TraceChunk[];
     validated: TraceChunk[];
@@ -237,8 +256,36 @@ export function AnalyticsPage() {
                     <div className="list-main">
                       <strong>{trace.customerMessagePreview || 'پیام بدون متن'}</strong>
                       <span>
-                        {formatDate(trace.createdAt)} · {faLabel(trace.decision)}
+                        {formatDate(trace.createdAt)} ·{' '}
+                        {trace.errorCode
+                          ? `خطا: ${faLabel(trace.errorCode)}`
+                          : trace.outcome === 'FAILED'
+                            ? `خطا در پردازش · ${faLabel(trace.outcomeReason)}`
+                            : trace.decision
+                              ? faLabel(trace.decision)
+                              : trace.outcome === 'HANDOFF'
+                                ? 'عدم امکان پاسخ هوشمند'
+                                : faLabel(trace.outcome)}
                       </span>
+                      {(trace.wasRewritten || trace.isCopyPaste || trace.errorCode) && (
+                        <div className="trace-badges">
+                          {trace.wasRewritten && (
+                            <span className="trace-tag rewrite" title="پرس‌وجو توسط مدل بازنویسی شد">
+                              ↺ بازنویسی‌شده
+                            </span>
+                          )}
+                          {trace.isCopyPaste && (
+                            <span className="trace-tag exact" title="انطباق با سوالات متداول Qdrant">
+                              ⚡ کپی‌پیست FAQ
+                            </span>
+                          )}
+                          {trace.errorCode && (
+                            <span className="trace-tag error" title={trace.errorCode}>
+                              ! {faLabel(trace.errorCode)}
+                            </span>
+                          )}
+                        </div>
+                      )}
                     </div>
                     <div className="trace-summary">
                       <Badge status={trace.outcome}>{faLabel(trace.outcome)}</Badge>
@@ -326,6 +373,26 @@ export function AnalyticsTracePage() {
             <li>
               <Card title="۱. پیام مشتری">
                 <Messages items={trace.customerMessages} />
+                {trace.queryRewrite && (
+                  <div className="query-rewrite-container">
+                    <div className="analytics-subheading">فرآیند بازنویسی هوشمند (Query Rewriter)</div>
+                    {trace.queryRewrite.wasRewritten ? (
+                      <div className="rewrite-box rewritten">
+                        <div className="rewrite-meta">
+                          <Badge status="READY">بازنویسی بر اساس زمینه انجام شد</Badge>
+                          <span className="muted">عبارت زیر به عنوان پرس‌وجوی جستجوی برداری در Qdrant استفاده شد:</span>
+                        </div>
+                        <p className="rewrite-query font-mono" dir="auto">{trace.queryRewrite.rewrittenQuery}</p>
+                      </div>
+                    ) : (
+                      <div className="rewrite-box standard">
+                        <span className="muted">
+                          پیام مشتری خودکفا و مشخص بود و بدون نیاز به بازنویسی، مستقیماً برای جستجو در Qdrant استفاده شد.
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                )}
               </Card>
             </li>
             <li>
@@ -345,6 +412,38 @@ export function AnalyticsTracePage() {
             </li>
             <li>
               <Card title="۳. نتایج بازیابی دانش">
+                <div className="exact-match-section">
+                  <div className="analytics-subheading">جستجوی پاسخ‌های کپی‌پیست (FAQ) در Qdrant</div>
+                  {trace.exactMatch?.matched ? (
+                    <div className="exact-match-card success">
+                      <div className="exact-match-head">
+                        <Badge status="EXACT_ANSWER">انطباق قطعی با سوالات متداول Qdrant</Badge>
+                        <span className="ltr font-mono">{score(trace.exactMatch.score)}</span>
+                      </div>
+                      <div className="exact-match-details">
+                        <p><strong>سوال تطبیق‌یافته:</strong> {trace.exactMatch.questionText}</p>
+                        {trace.exactMatch.answerName && (
+                          <p><strong>عنوان پاسخ متناظر:</strong> {trace.exactMatch.answerName}</p>
+                        )}
+                        {trace.exactMatch.answerContent && (
+                          <div className="exact-answer-preview">
+                            <strong>متن پاسخ کپی‌پیست:</strong>
+                            <p className="pre-wrap">{trace.exactMatch.answerContent}</p>
+                          </div>
+                        )}
+                      </div>
+                      <small className="muted">
+                        به دلیل تطابق کامل با آستانه دقت FAQ در Qdrant، فرآیند سنتز مدل هوش مصنوعی (LLM) بای‌پس شده و پاسخ عیناً ارسال شد.
+                      </small>
+                    </div>
+                  ) : (
+                    <p className="exact-match-empty muted">
+                      در مجموعه سوالات متداول (FAQ) Qdrant انطباقی با آستانه مجاز یافت نشد؛ جستجو در قطعات دانش RAG انجام گرفت.
+                    </p>
+                  )}
+                </div>
+
+                <div className="analytics-subheading">جستجوی قطعات دانش RAG در Qdrant</div>
                 <div className="stage-counts">
                   <span>خام از Qdrant: {trace.retrieval.raw.length.toLocaleString('fa-IR')}</span>
                   <span>
@@ -385,15 +484,26 @@ export function AnalyticsTracePage() {
                         <small className="ltr technical-id">{chunk.chunkId}</small>
                       </details>
                     ))
+                  ) : trace.exactMatch?.matched ? (
+                    <p className="muted">به دلیل انطباق مستقیم FAQ در Qdrant، بازیابی قطعات RAG انجام نشد.</p>
                   ) : (
-                    <p className="muted">نتیجه‌ای از Qdrant دریافت نشد.</p>
+                    <div className="retrieval-empty-box">
+                      <p className="error-text">⚠️ نتیجه‌ای از دیتابیس برداری Qdrant با امتیاز کافی دریافت نشد.</p>
+                      <small className="muted">
+                        پایگاه دانش برای این پرس‌وجو قطعه‌ای با شباهت بالاتر از حد مجاز برنگرداند.
+                      </small>
+                    </div>
                   )}
                 </div>
               </Card>
             </li>
             <li>
               <Card title="۴. داده‌های ارسال‌شده به هوش مصنوعی">
-                {trace.retrieval.sentToAi ? (
+                {trace.exactMatch?.matched ? (
+                  <p className="muted">
+                    به دلیل انتخاب پاسخ کپی‌پیست مستقیم FAQ، هیچ قطعه دانشی به مدل زبانی ارسال نشد.
+                  </p>
+                ) : trace.retrieval.sentToAi ? (
                   <>
                     <p>
                       {trace.retrieval.sentToAi.length.toLocaleString('fa-IR')} قطعه تأییدشده به مدل
@@ -416,6 +526,61 @@ export function AnalyticsTracePage() {
             </li>
             <li>
               <Card title="۵. تصمیم و پاسخ هوش مصنوعی">
+                {(trace.outcome.status === 'FAILED' || Boolean(trace.outcome.errorCode)) && (
+                  <div className="diagnosis-box error">
+                    <div className="diagnosis-head">
+                      <strong>❌ خطا در فرآیند پردازش پاسخ هوش مصنوعی</strong>
+                      {trace.outcome.errorCode && (
+                        <Badge status="FAILED">{trace.outcome.errorCode}</Badge>
+                      )}
+                    </div>
+                    <p className="diagnosis-desc">
+                      <strong>علت خطا:</strong>{' '}
+                      {faLabel(trace.outcome.errorCode || trace.outcome.reason || 'EXTERNAL_SERVICE_FAILURE')}
+                    </p>
+                    <small className="muted">
+                      پردازش این پیام به دلیل بروز خطا در وب‌سرویس یا زیرساخت خارجی با شکست مواجه شد و گفتگو به پشتیبان انسانی ارجاع گردید.
+                    </small>
+                  </div>
+                )}
+
+                {trace.outcome.status !== 'FAILED' &&
+                  !trace.outcome.errorCode &&
+                  (trace.ai.answerable === false ||
+                    trace.ai.decision === 'HANDOFF' ||
+                    trace.outcome.reason === 'AI_NOT_ANSWERABLE') && (
+                    <div className="diagnosis-box warning">
+                      <div className="diagnosis-head">
+                        <strong>⚠️ مدل هوش مصنوعی امکان پاسخ‌گویی به این سوال را نداشت</strong>
+                        <Badge status="HANDOFF">ارجاع به پشتیبان انسانی</Badge>
+                      </div>
+                      {trace.ai.reason && (
+                        <p className="diagnosis-desc">
+                          <strong>دلیل اعلام‌شده توسط مدل:</strong> {trace.ai.reason}
+                        </p>
+                      )}
+                      <p className="muted">
+                        {trace.retrieval.raw.length === 0
+                          ? 'علت تشخیصی: هیچ قطعه دانش مرتبطی در پایگاه داده Qdrant یافت نشد (خلا دانش).'
+                          : trace.retrieval.validated.length === 0
+                            ? 'علت تشخیصی: تمام قطعات یافت‌شده در اعتبارسنجی MySQL رد شدند.'
+                            : 'علت تشخیصی: اطلاعات موجود در پایگاه دانش برای ارائه یک پاسخ قطعی ناکافی بود یا اطمینان مدل پایین بود.'}
+                      </p>
+                    </div>
+                  )}
+
+                {trace.exactMatch?.matched && (
+                  <div className="diagnosis-box success">
+                    <div className="diagnosis-head">
+                      <strong>⚡ پاسخ مستقیم FAQ (کپی‌پیست)</strong>
+                      <Badge status="READY">بدون نیاز به LLM</Badge>
+                    </div>
+                    <p className="muted">
+                      پاسخ به صورت قطعی و مستقیم از سوالات متداول استخراج شده و بدون نیاز به فراخوانی مدل ارسال گردید.
+                    </p>
+                  </div>
+                )}
+
                 <div className="key-values">
                   <div className="key-value">
                     <span>تصمیم</span>
@@ -447,12 +612,17 @@ export function AnalyticsTracePage() {
                     <p className="pre-wrap">{trace.ai.answer}</p>
                   </div>
                 )}
-                {trace.ai.reason && (
-                  <details>
-                    <summary>دلیل ساختاریافته مدل</summary>
-                    <p>{trace.ai.reason}</p>
-                  </details>
-                )}
+                {trace.ai.reason &&
+                  !trace.exactMatch?.matched &&
+                  trace.outcome.status !== 'FAILED' &&
+                  trace.ai.answerable !== false &&
+                  trace.ai.decision !== 'HANDOFF' &&
+                  trace.outcome.reason !== 'AI_NOT_ANSWERABLE' && (
+                    <details>
+                      <summary>دلیل ساختاریافته مدل</summary>
+                      <p>{trace.ai.reason}</p>
+                    </details>
+                  )}
               </Card>
             </li>
             <li>
