@@ -2,6 +2,15 @@ git fetch origin
 git switch main
 git reset --hard origin/main
 
+npm install --no-save --no-audit --no-fund prisma@6.19.3
+TOKIO_WORKER_THREADS=1 RAYON_NUM_THREADS=1 node ./node_modules/prisma/build/index.js generate
+
+
+
+npx prisma generate
+# ۲. اعمال مایگریشن‌های دیتابیس (ساخت جداول ExactAnswer و فیلدهای جدید در MySQL)
+npx prisma migrate deploy
+
 ## 🚀 1. First-Time Setup & Deployment
 
 Run these steps once when setting up the project on the server:
