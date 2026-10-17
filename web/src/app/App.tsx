@@ -15,7 +15,7 @@ import {
   KnowledgeDetailPage,
   KnowledgePage,
 } from '../features/knowledge/KnowledgePages';
-import { AdminsPage, AuditPage, MorePage, NotificationsPage } from '../features/admin/AdminPages';
+import { AdminsPage, MorePage, NotificationsPage } from '../features/admin/AdminPages';
 import { EmptyState } from '../components/ui';
 import { AnalyticsPage, AnalyticsTracePage } from '../features/analytics/AnalyticsPages';
 import { LogsPage } from '../features/diagnostics/LogsPage';
@@ -153,14 +153,6 @@ export function App() {
                     element={
                       <CapabilityRoute capability="admin:manage">
                         <AdminsPage />
-                      </CapabilityRoute>
-                    }
-                  />
-                  <Route
-                    path="audit"
-                    element={
-                      <CapabilityRoute capability="audit:read">
-                        <AuditPage />
                       </CapabilityRoute>
                     }
                   />

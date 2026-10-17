@@ -190,60 +190,6 @@ export function AdminsPage() {
   );
 }
 
-interface AuditItem {
-  id: string;
-  action: string;
-  actorType: string;
-  entityType: string;
-  entityId: string;
-  createdAt: string;
-}
-export function AuditPage() {
-  const { businessPath } = useSession();
-  const query = useQuery({
-    queryKey: ['audit', businessPath('')],
-    queryFn: () => request<AuditItem[]>(businessPath('/audit')),
-  });
-  return (
-    <>
-      <PageHeader
-        title="گزارش فعالیت‌ها"
-        subtitle={
-          query.data
-            ? `${query.data.length.toLocaleString('fa-IR')} رویداد اخیر`
-            : 'تاریخچه تغییرات حساس سامانه'
-        }
-      />
-      <QueryState pending={query.isPending} error={query.error}>
-        <div className="list">
-          {query.data?.length ? (
-            query.data.map((item) => (
-              <article className="list-card" key={item.id}>
-                <div className="list-main">
-                  <strong>{faLabel(item.action)}</strong>
-                  <span>
-                    {item.actorType === 'SYSTEM' ? 'سامانه' : 'مدیر'} · {faLabel(item.entityType)}
-                  </span>
-                </div>
-                <div className="list-meta">
-                  <time>{formatDate(item.createdAt)}</time>
-                  <bdi className="ltr">{item.entityId.slice(0, 12)}</bdi>
-                </div>
-              </article>
-            ))
-          ) : (
-            <EmptyState
-              icon="◷"
-              title="فعالیتی ثبت نشده است"
-              description="تغییرات حساس پس از انجام در این بخش ثبت می‌شوند."
-            />
-          )}
-        </div>
-      </QueryState>
-    </>
-  );
-}
-
 interface NotificationDelivery {
   id: string;
   readAt: string | null;
@@ -312,7 +258,6 @@ const descriptions: Record<string, string> = {
   '/connections': 'ارتباط حساب پشتیبانی',
   '/system': 'وضعیت اتصال، سلامت سرویس‌ها، صف‌ها و عیب‌یابی',
   '/admins': 'نقش‌ها و دسترسی',
-  '/audit': 'تغییرات حساس',
   '/notifications': 'هشدارهای اخیر',
   '/settings': 'پیکربندی عملیاتی',
 };
@@ -323,7 +268,6 @@ export function MorePage() {
     ...(hasCapability('knowledge:manage') ? [['/knowledge', '▤', 'مدیریت دانش']] : []),
     ['/system', '♡', 'سلامت و عیب‌یابی'],
     ...(hasCapability('admin:manage') ? [['/admins', '♙', 'مدیران']] : []),
-    ...(hasCapability('audit:read') ? [['/audit', '◷', 'فعالیت‌ها']] : []),
     ['/notifications', '♢', 'اعلان‌ها'],
     ...(hasCapability('settings:read') ? [['/settings', '⚙', 'تنظیمات']] : []),
   ];

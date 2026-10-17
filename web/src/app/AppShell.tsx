@@ -25,7 +25,6 @@ export function AppShell() {
     ['/system', '♡', 'سلامت و عیب‌یابی'] as const,
     ...(hasCapability('diagnostics:read') ? [['/logs', '≡', 'لاگ‌ها'] as const] : []),
     ...(hasCapability('admin:manage') ? [['/admins', '♙', 'مدیران'] as const] : []),
-    ...(hasCapability('audit:read') ? [['/audit', '◷', 'فعالیت‌ها'] as const] : []),
     ['/notifications', '♢', 'اعلان‌ها'] as const,
     ...(hasCapability('settings:read') ? [['/settings', '⚙', 'تنظیمات'] as const] : []),
   ];
